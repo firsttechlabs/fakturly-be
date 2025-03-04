@@ -1,0 +1,99 @@
+// This is your Prisma schema file
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Currency {
+  IDR
+  USD
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String
+  name          String
+  businessName  String?
+  businessLogo  String?
+  address       String?
+  phone         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  invoices      Invoice[]
+  settings      Settings?
+}
+
+model Settings {
+  id                String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoicePrefix    String?
+  nextInvoiceNumber Int     @default(1)
+  currency         Currency @default(IDR)
+  taxRate          Float?
+  licenseKey       String   @unique
+  licenseStatus    String   @default("ACTIVE") // ACTIVE, SUSPENDED
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Invoice {
+  id              String    @id @default(uuid())
+  invoiceNumber   String    @unique
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customerName    String
+  customerEmail   String
+  customerPhone   String?
+  status          String    @default("UNPAID") // UNPAID, PAID, OVERDUE, CANCELLED
+  currency        Currency  @default(IDR)
+  issueDate       DateTime  @default(now())
+  dueDate         DateTime
+  subtotal        Float
+  taxAmount       Float?
+  discount        Float?
+  total           Float
+  notes           String?
+  items           InvoiceItem[]
+  reminders       InvoiceReminder[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+model InvoiceItem {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Int
+  unitPrice   Float
+  amount      Float
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([invoiceId])
+}
+
+model InvoiceReminder {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  sentAt      DateTime @default(now())
+  type        String   // BEFORE_DUE, ON_DUE, AFTER_DUE
+  status      String   // SENT, FAILED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([invoiceId])
+  @@index([type])
+  @@index([status])
+} 
