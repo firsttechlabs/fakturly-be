@@ -57,6 +57,8 @@ model Invoice {
   tax             Float             @default(0)
   total           Float
   notes           String?
+  paymentProof    String?           // URL to payment proof image
+  paidAt          DateTime?         // When the invoice was marked as paid
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   userId          String
@@ -159,10 +161,8 @@ enum Role {
 }
 
 enum InvoiceStatus {
-  DRAFT
   UNPAID
   PAID
-  SENT
   OVERDUE
   CANCELLED
 }

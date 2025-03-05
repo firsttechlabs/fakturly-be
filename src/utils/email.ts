@@ -22,6 +22,7 @@ const transporter = nodemailer.createTransport({
 export async function sendInvoiceEmail(invoice: InvoiceWithItems): Promise<void> {
   const {
     number: invoiceNumber,
+    date,
     dueDate,
     items,
     subtotal,
@@ -34,72 +35,147 @@ export async function sendInvoiceEmail(invoice: InvoiceWithItems): Promise<void>
 
   const itemsHtml = items
     .map(
-      (item) => `
-      <tr>
-        <td style="padding: 12px; border-bottom: 1px solid #eee;">${item.description}</td>
-        <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right;">${item.quantity}</td>
-        <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right;">${formatCurrency(item.price)}</td>
-        <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right;">${formatCurrency(item.price * item.quantity)}</td>
+      (item, index) => `
+      <tr style="${index % 2 === 0 ? '' : 'background-color: #fafafa;'}">
+        <td style="padding: 16px; border-bottom: 1px solid #eee;">${item.description}</td>
+        <td style="padding: 16px; border-bottom: 1px solid #eee; text-align: right;">${item.quantity}</td>
+        <td style="padding: 16px; border-bottom: 1px solid #eee; text-align: right;">${formatCurrency(item.price)}</td>
+        <td style="padding: 16px; border-bottom: 1px solid #eee; text-align: right;">${formatCurrency(item.price * item.quantity)}</td>
       </tr>
     `
     )
     .join('');
 
   const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
-      <div style="background-color: #f8f9fa; padding: 20px; margin-bottom: 20px;">
-        <h2 style="margin: 0; color: #333;">${user.businessName || user.name}</h2>
-        <p style="margin: 5px 0; color: #666;">${user.email}</p>
-      </div>
-
-      <div style="margin-bottom: 40px;">
-        <h1 style="color: #333;">Invoice ${invoiceNumber}</h1>
-        <p style="color: #666;">Due Date: ${new Date(dueDate).toLocaleDateString()}</p>
-      </div>
-
-      <div style="margin-bottom: 40px;">
-        <h3 style="color: #333;">Bill To:</h3>
-        <p style="margin: 5px 0;">${customer.name}</p>
-        <p style="margin: 5px 0;">${customer.email}</p>
-      </div>
-
-      <table style="width: 100%; border-collapse: collapse; margin-bottom: 40px;">
-        <thead>
-          <tr style="background-color: #f8f9fa;">
-            <th style="padding: 12px; text-align: left;">Description</th>
-            <th style="padding: 12px; text-align: right;">Quantity</th>
-            <th style="padding: 12px; text-align: right;">Unit Price</th>
-            <th style="padding: 12px; text-align: right;">Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${itemsHtml}
-        </tbody>
-      </table>
-
-      <div style="margin-left: auto; width: 300px;">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-          <span>Subtotal:</span>
-          <span>${formatCurrency(subtotal)}</span>
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Faktur ${invoiceNumber}</title>
+      <style>
+        body { margin: 0; padding: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+      </style>
+    </head>
+    <body>
+      <div style="max-width: 800px; margin: 0 auto; padding: 40px 24px; background: white;">
+        <!-- Header -->
+        <div style="margin-bottom: 40px;">
+          <h1 style="font-size: 24px; font-weight: 600; color: #1a1a1a; margin: 0;">
+            Faktur ${invoiceNumber}
+          </h1>
         </div>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-          <span>Tax:</span>
-          <span>${formatCurrency(taxAmount || 0)}</span>
+
+        <!-- Info Grid -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 40px;">
+          <!-- Customer Details -->
+          <div style="background-color: #f8f9fa; border-radius: 8px; padding: 24px;">
+            <h2 style="font-size: 16px; font-weight: 600; color: #00796b; margin: 0 0 16px 0;">
+              Detail Pelanggan
+            </h2>
+            <p style="font-size: 16px; font-weight: 500; color: #1a1a1a; margin: 0 0 8px 0;">
+              ${customer.name}
+            </p>
+            ${customer.email ? 
+              `<p style="font-size: 14px; color: #666; margin: 4px 0;">
+                ${customer.email}
+              </p>` : ''}
+            ${customer.phone ? 
+              `<p style="font-size: 14px; color: #666; margin: 4px 0;">
+                ${customer.phone}
+              </p>` : ''}
+          </div>
+
+          <!-- Invoice Details -->
+          <div style="background-color: #f8f9fa; border-radius: 8px; padding: 24px;">
+            <h2 style="font-size: 16px; font-weight: 600; color: #00796b; margin: 0 0 16px 0;">
+              Detail Faktur
+            </h2>
+            <p style="font-size: 14px; color: #666; margin: 8px 0;">
+              Tanggal: ${new Date(date).toLocaleDateString('id-ID', { 
+                day: 'numeric', 
+                month: 'long', 
+                year: 'numeric' 
+              })}
+            </p>
+            <p style="font-size: 14px; color: #666; margin: 8px 0;">
+              Jatuh Tempo: ${new Date(dueDate).toLocaleDateString('id-ID', { 
+                day: 'numeric', 
+                month: 'long', 
+                year: 'numeric' 
+              })}
+            </p>
+          </div>
         </div>
-        <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 1.2em;">
-          <span>Total:</span>
-          <span>${formatCurrency(total)}</span>
+
+        <!-- Items Table -->
+        <div style="margin-bottom: 40px; border: 1px solid #eee; border-radius: 8px; overflow: hidden;">
+          <table style="width: 100%; border-collapse: collapse; background-color: white;">
+            <thead>
+              <tr style="background-color: #f8f9fa;">
+                <th style="padding: 16px; text-align: left; font-weight: 600; color: #1a1a1a; border-bottom: 2px solid #eee;">
+                  Deskripsi
+                </th>
+                <th style="padding: 16px; text-align: right; font-weight: 600; color: #1a1a1a; border-bottom: 2px solid #eee;">
+                  Jumlah
+                </th>
+                <th style="padding: 16px; text-align: right; font-weight: 600; color: #1a1a1a; border-bottom: 2px solid #eee;">
+                  Harga Satuan
+                </th>
+                <th style="padding: 16px; text-align: right; font-weight: 600; color: #1a1a1a; border-bottom: 2px solid #eee;">
+                  Total
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHtml}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Totals -->
+        <div style="margin-left: auto; width: 300px; margin-bottom: 40px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <span style="color: #666;">Subtotal:</span>
+            <span style="color: #666;">${formatCurrency(subtotal)}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <span style="color: #666;">Pajak:</span>
+            <span style="color: #666;">${formatCurrency(taxAmount || 0)}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding-top: 8px; border-top: 2px solid #eee;">
+            <span style="font-weight: 600; color: #00796b;">Total:</span>
+            <span style="font-weight: 600; color: #00796b;">${formatCurrency(total)}</span>
+          </div>
+        </div>
+
+        ${notes ? `
+          <!-- Notes -->
+          <div style="background-color: #f8f9fa; border-radius: 8px; padding: 24px; margin-bottom: 40px;">
+            <h2 style="font-size: 16px; font-weight: 600; color: #00796b; margin: 0 0 16px 0;">
+              Catatan
+            </h2>
+            <p style="font-size: 14px; color: #666; margin: 0; white-space: pre-wrap;">
+              ${notes}
+            </p>
+          </div>
+        ` : ''}
+
+        <!-- Footer -->
+        <div style="text-align: center; padding-top: 40px; border-top: 1px solid #eee;">
+          <p style="font-size: 14px; color: #666; margin: 0;">
+            Email ini dikirim oleh ${user.businessName || user.name}
+          </p>
         </div>
       </div>
-
-      ${notes ? `<div style="margin-top: 40px; color: #666;"><h3>Notes:</h3><p>${notes}</p></div>` : ''}
-    </div>
+    </body>
+    </html>
   `;
 
   await transporter.sendMail({
     from: `"${user.businessName || user.name}" <${user.email}>`,
     to: customer.email!,
-    subject: `Invoice ${invoiceNumber} from ${user.businessName || user.name}`,
+    subject: `Faktur ${invoiceNumber} dari ${user.businessName || user.name}`,
     html,
   });
 }
@@ -112,25 +188,67 @@ export const sendReminderEmail = async (invoice: InvoiceWithItems) => {
     );
 
     const html = `
-      <h2>Payment Reminder: Invoice ${invoice.number}</h2>
-      <p>Dear ${invoice.customer.name},</p>
-      
-      <p>This is a reminder that the payment for invoice ${
-        invoice.number
-      } is ${daysOverdue > 0 ? `overdue by ${daysOverdue} days` : 'due today'}.</p>
-      
-      <p><strong>Amount Due: Rp ${invoice.total.toLocaleString('id-ID')}</strong></p>
-      <p><strong>Due Date: ${invoice.dueDate.toLocaleDateString('id-ID')}</strong></p>
-      
-      <p>Please process the payment as soon as possible.</p>
-      
-      <p>Best regards,<br>${businessName}</p>
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Pengingat Pembayaran: Faktur ${invoice.number}</title>
+        <style>
+          body { margin: 0; padding: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+        </style>
+      </head>
+      <body>
+        <div style="max-width: 800px; margin: 0 auto; padding: 40px 24px; background: white;">
+          <h1 style="font-size: 24px; font-weight: 600; color: #00796b; margin: 0 0 32px 0;">
+            Pengingat Pembayaran: Faktur ${invoice.number}
+          </h1>
+          
+          <p style="font-size: 16px; color: #1a1a1a; margin: 16px 0;">
+            Yth. ${invoice.customer.name},
+          </p>
+          
+          <p style="font-size: 16px; color: #1a1a1a; margin: 16px 0;">
+            Ini adalah pengingat bahwa pembayaran untuk faktur ${invoice.number} 
+            ${daysOverdue > 0 ? `telah jatuh tempo ${daysOverdue} hari` : 'jatuh tempo hari ini'}.
+          </p>
+          
+          <div style="background-color: #f8f9fa; border-radius: 8px; padding: 24px; margin: 32px 0;">
+            <p style="font-size: 16px; color: #1a1a1a; margin: 8px 0;">
+              <strong>Total Tagihan:</strong> ${formatCurrency(invoice.total)}
+            </p>
+            <p style="font-size: 16px; color: #1a1a1a; margin: 8px 0;">
+              <strong>Jatuh Tempo:</strong> ${invoice.dueDate.toLocaleDateString('id-ID', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+              })}
+            </p>
+          </div>
+          
+          <p style="font-size: 16px; color: #1a1a1a; margin: 16px 0;">
+            Mohon segera proses pembayaran Anda.
+          </p>
+          
+          <p style="font-size: 16px; color: #1a1a1a; margin: 16px 0;">
+            Hormat kami,<br>
+            ${businessName}
+          </p>
+
+          <div style="text-align: center; padding-top: 40px; border-top: 1px solid #eee; margin-top: 40px;">
+            <p style="font-size: 14px; color: #666; margin: 0;">
+              Email ini dikirim oleh ${businessName}
+            </p>
+          </div>
+        </div>
+      </body>
+      </html>
     `;
 
     await transporter.sendMail({
       from: `"${businessName}" <${invoice.user.email}>`,
       to: invoice.customer.email!,
-      subject: `Payment Reminder: Invoice ${invoice.number}`,
+      subject: `Pengingat Pembayaran: Faktur ${invoice.number}`,
       html,
     });
 

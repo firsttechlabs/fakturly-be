@@ -1,19 +1,77 @@
-import { Router } from "express";
+import { v2 as cloudinary } from "cloudinary";
+import {
+  endOfDay,
+  endOfMonth,
+  startOfDay,
+  startOfMonth,
+  subDays,
+  subMonths,
+} from "date-fns";
+import { Request, Router } from "express";
+import multer from "multer";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
 import { z } from "zod";
-import { prisma } from "../utils/prisma";
 import { authenticate } from "../middleware/auth";
 import { AppError } from "../middleware/errorHandler";
 import { sendInvoiceEmail } from "../utils/email";
-import {
-  startOfDay,
-  endOfDay,
-  subDays,
-  startOfMonth,
-  endOfMonth,
-  subMonths,
-} from "date-fns";
+import { prisma } from "../utils/prisma";
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 const router = Router();
+
+// Configure multer with Cloudinary storage
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req: Request, file: Express.Multer.File) => {
+    const currentDate = new Date();
+    const year = currentDate.getFullYear();
+    const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+    
+    // Get invoice ID from params
+    const invoiceId = req.params.id;
+    
+    // Create a structured folder path:
+    // fakturly/payment-proofs/YYYY/MM/invoice-id/
+    const folderPath = `fakturly/payment-proofs/${year}/${month}/${invoiceId}`;
+    
+    return {
+      folder: folderPath,
+      allowed_formats: ["jpg", "jpeg", "png"],
+      transformation: [
+        { width: 1000, height: 1000, crop: "limit" },
+        { quality: "auto" },
+        { fetch_format: "auto" }
+      ],
+      // Use a more descriptive public_id
+      public_id: `proof-${Date.now()}`,
+      // Add tags for better organization
+      tags: ['payment-proof', `invoice-${invoiceId}`, `year-${year}`, `month-${month}`]
+    };
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  },
+  fileFilter: (req: Request, file: Express.Multer.File, cb: any) => {
+    const allowedTypes = /jpeg|jpg|png/;
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (mimetype) {
+      cb(null, true);
+    } else {
+      cb(new Error("Hanya file gambar yang diperbolehkan (JPG, JPEG, PNG)"));
+    }
+  }
+});
 
 const createInvoiceSchema = z.object({
   customerId: z.string(),
@@ -32,13 +90,11 @@ const createInvoiceSchema = z.object({
 
 const updateInvoiceSchema = z.object({
   status: z.enum(["UNPAID", "PAID", "OVERDUE", "CANCELLED"]).optional(),
-  dueDate: z
-    .string()
-    .refine((date) => !isNaN(Date.parse(date)), {
-      message: "Invalid due date",
-    })
-    .optional(),
+  paymentProof: z.string().nullable().optional(),
+  paymentNote: z.string().nullable().optional(),
+  dueDate: z.string().datetime().optional(),
   notes: z.string().optional(),
+  paidAt: z.string().datetime().optional().transform((val) => val ? new Date(val) : undefined),
 });
 
 router.use(authenticate);
@@ -169,28 +225,134 @@ router.post("/", authenticate, async (req, res, next) => {
   }
 });
 
-// Update invoice
-router.patch("/:id", async (req, res, next) => {
+// Upload payment proof
+router.post("/:id/payment-proof", upload.single("file"), async (req, res) => {
   try {
-    const data = updateInvoiceSchema.parse(req.body);
+    const { id } = req.params;
+    const file = req.file;
 
-    const invoice = await prisma.invoice.update({
-      where: {
-        id: req.params.id,
-        userId: (req as any).user.id,
-      },
-      data,
-      include: {
-        items: true,
-      },
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        message: "Tidak ada file yang diunggah"
+      });
+    }
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { id }
     });
 
-    res.json({
-      status: "success",
-      data: invoice,
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        message: "Faktur tidak ditemukan"
+      });
+    }
+
+    if (invoice.status === "PAID") {
+      return res.status(400).json({
+        success: false,
+        message: "Faktur sudah lunas"
+      });
+    }
+
+    if (invoice.status === "CANCELLED") {
+      return res.status(400).json({
+        success: false,
+        message: "Faktur sudah dibatalkan"
+      });
+    }
+
+    // Return the Cloudinary URL
+    return res.json({
+      success: true,
+      data: {
+        url: file.path // Cloudinary URL will be in file.path
+      }
     });
   } catch (error) {
-    next(error);
+    console.error("Error uploading payment proof:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Gagal mengunggah bukti pembayaran"
+    });
+  }
+});
+
+// Update invoice
+router.patch("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = updateInvoiceSchema.safeParse(req.body);
+
+    if (!updateData.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Data tidak valid",
+        errors: updateData.error.errors
+      });
+    }
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { id }
+    });
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        message: "Faktur tidak ditemukan"
+      });
+    }
+
+    // Only allow cancellation for paid invoices
+    if (invoice.status === "PAID" && updateData.data.status !== "CANCELLED") {
+      return res.status(400).json({
+        success: false,
+        message: "Faktur yang sudah lunas tidak dapat diubah statusnya"
+      });
+    }
+
+    // Don't allow any changes to cancelled invoices
+    if (invoice.status === "CANCELLED") {
+      return res.status(400).json({
+        success: false,
+        message: "Faktur yang sudah dibatalkan tidak dapat diubah"
+      });
+    }
+
+    // If marking as paid, ensure paidAt is set
+    const finalUpdateData = { 
+      ...updateData.data,
+      // Map paymentNote to notes if it exists in the update data
+      notes: 'paymentNote' in updateData.data ? updateData.data.paymentNote : undefined,
+      // Ensure paymentProof is included in the update
+      paymentProof: updateData.data.paymentProof
+    };
+    
+    // Remove paymentNote as it's not a valid field
+    if ('paymentNote' in finalUpdateData) {
+      delete (finalUpdateData as any).paymentNote;
+    }
+
+    if (finalUpdateData.status === "PAID" && invoice.status !== "PAID") {
+      finalUpdateData.paidAt = new Date();
+    }
+
+    const updatedInvoice = await prisma.invoice.update({
+      where: { id },
+      data: finalUpdateData
+    });
+
+    return res.json({
+      success: true,
+      data: updatedInvoice
+    });
+  } catch (error) {
+    console.error("Error updating invoice:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Gagal memperbarui faktur"
+    });
   }
 });
 
@@ -238,12 +400,15 @@ router.post("/:id/send", async (req, res, next) => {
       throw new AppError(404, "Invoice not found");
     }
 
-    await sendInvoiceEmail(invoice);
+    if (invoice.status === "PAID") {
+      throw new AppError(400, "Paid invoices cannot be sent");
+    }
 
-    await prisma.invoice.update({
-      where: { id: req.params.id },
-      data: { status: "SENT" },
-    });
+    if (invoice.status === "CANCELLED") {
+      throw new AppError(400, "Cancelled invoices cannot be sent");
+    }
+
+    await sendInvoiceEmail(invoice);
 
     res.json({
       status: "success",
