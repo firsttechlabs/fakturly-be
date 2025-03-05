@@ -1,57 +1,99 @@
-import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import { prisma } from '../utils/prisma';
-import { AppError } from './errorHandler';
+import { NextFunction, Request, Response } from "express";
+import jwt from "jsonwebtoken";
+import { prisma } from "../utils/prisma";
+import { Role } from "@prisma/client";
+import dotenv from "dotenv";
+dotenv.config();
 
-// Extend Express Request type to include user
-declare global {
-  namespace Express {
-    interface Request {
-      user?: {
-        id: string;
-        email: string;
-      };
-    }
-  }
+export interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    email: string;
+    role: Role;
+  };
 }
 
-export async function authenticate(
+export const authenticate = async (
   req: Request,
   res: Response,
   next: NextFunction
-) {
+) => {
   try {
-    // Get token from cookie or Authorization header
-    const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
-    
+    const token = req.headers.authorization?.split(" ")[1];
     if (!token) {
-      throw new AppError(401, 'Authentication required');
+      res.status(401).json({ message: "Token tidak ditemukan" });
+      return;
     }
 
-    // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
       id: string;
       email: string;
+      role: Role;
     };
 
-    // Check if user exists
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
-      select: { id: true, email: true }
+      select: { id: true, email: true, role: true },
     });
 
     if (!user) {
-      throw new AppError(401, 'Invalid token');
+      res.status(401).json({ message: "User tidak ditemukan" });
+      return;
     }
 
-    // Add user to request object
-    req.user = user;
+    (req as AuthRequest).user = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    };
     next();
   } catch (error) {
-    if (error instanceof jwt.JsonWebTokenError) {
-      next(new AppError(401, 'Invalid token'));
-    } else {
-      next(error);
-    }
+    res.status(401).json({ message: "Token tidak valid" });
   }
-} 
+};
+
+export const requirePayment = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const authReq = req as AuthRequest;
+    if (!authReq.user) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    const payment = await prisma.payment.findFirst({
+      where: {
+        userId: authReq.user.id,
+        status: "SUCCESS",
+      },
+    });
+
+    if (!payment) {
+      res
+        .status(403)
+        .json({ message: "Pembayaran diperlukan untuk mengakses fitur ini" });
+      return;
+    }
+
+    next();
+  } catch (error) {
+    console.error("Error checking payment status:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const requireAdmin = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const authReq = req as AuthRequest;
+  if (authReq.user?.role !== "ADMIN") {
+    res.status(403).json({ message: "Akses ditolak" });
+    return;
+  }
+  next();
+};

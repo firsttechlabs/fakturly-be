@@ -9,26 +9,25 @@ const router = Router();
 const updateSettingsSchema = z.object({
   invoicePrefix: z.string().optional(),
   taxRate: z.number().min(0).max(100).optional(),
-  currency: z.enum(["IDR", "USD"]).optional(),
 });
 
 router.get("/", authenticate, async (req, res) => {
   try {
     const settings = await prisma.settings.findUnique({
-      where: { userId: req.user!.id },
+      where: { userId: (req as any).user.id },
     });
 
     if (!settings) {
-      throw new AppError(404, "Settings not found");
+      throw new AppError(404, "Pengaturan tidak ditemukan");
     }
 
     res.json({
-      status: "success",
+      success: true,
       data: settings,
     });
   } catch (error) {
     console.error("Error fetching settings:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ success: false, message: "Terjadi kesalahan internal" });
   }
 });
 
@@ -37,20 +36,20 @@ router.patch("/", authenticate, async (req, res) => {
     const data = updateSettingsSchema.parse(req.body);
 
     const settings = await prisma.settings.update({
-      where: { userId: req.user!.id },
+      where: { userId: (req as any).user.id },
       data,
     });
 
     res.json({
-      status: "success",
+      success: true,
       data: settings,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({ message: "Invalid input", errors: error.errors });
+      res.status(400).json({ success: false, message: "Input tidak valid", errors: error.errors });
     } else {
       console.error("Error updating settings:", error);
-      res.status(500).json({ message: "Internal server error" });
+      res.status(500).json({ success: false, message: "Terjadi kesalahan internal" });
     }
   }
 });
@@ -59,7 +58,7 @@ router.patch("/", authenticate, async (req, res) => {
 router.get("/license", authenticate, async (req, res, next) => {
   try {
     const settings = await prisma.settings.findUnique({
-      where: { userId: req.user!.id },
+      where: { userId: (req as any).user.id },
       select: {
         licenseKey: true,
         licenseStatus: true,
@@ -67,11 +66,11 @@ router.get("/license", authenticate, async (req, res, next) => {
     });
 
     if (!settings) {
-      throw new AppError(404, "Settings not found");
+      throw new AppError(404, "Pengaturan tidak ditemukan");
     }
 
     res.json({
-      status: "success",
+      success: true,
       data: {
         licenseKey: settings.licenseKey,
         licenseStatus: settings.licenseStatus,

@@ -1,99 +1,180 @@
-// This is your Prisma schema file
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
   provider = "prisma-client-js"
 }
 
-enum Currency {
-  IDR
-  USD
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  password      String
-  name          String
-  businessName  String?
-  businessLogo  String?
-  address       String?
-  phone         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  invoices      Invoice[]
-  settings      Settings?
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  password     String
+  businessName String?
+  businessLogo String?
+  address      String?
+  phone        String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  isActive     Boolean    @default(true)
+  role         Role       @default(USER)
+  invoices     Invoice[]
+  customers    Customer[]
+  payments     Payment[]
+  settings     Settings?
+
+  @@index([email])
 }
 
-model Settings {
-  id                String   @id @default(uuid())
-  userId           String   @unique
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  invoicePrefix    String?
-  nextInvoiceNumber Int     @default(1)
-  currency         Currency @default(IDR)
-  taxRate          Float?
-  licenseKey       String   @unique
-  licenseStatus    String   @default("ACTIVE") // ACTIVE, SUSPENDED
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+model Customer {
+  id        String    @id @default(uuid())
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  invoices  Invoice[]
+
+  @@index([userId])
 }
 
 model Invoice {
-  id              String    @id @default(uuid())
-  invoiceNumber   String    @unique
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  customerName    String
-  customerEmail   String
-  customerPhone   String?
-  status          String    @default("UNPAID") // UNPAID, PAID, OVERDUE, CANCELLED
-  currency        Currency  @default(IDR)
-  issueDate       DateTime  @default(now())
+  id              String            @id @default(uuid())
+  number          String            @unique
+  date            DateTime
   dueDate         DateTime
+  status          InvoiceStatus     @default(UNPAID)
   subtotal        Float
-  taxAmount       Float?
-  discount        Float?
+  tax             Float             @default(0)
   total           Float
   notes           String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  userId          String
+  customerId      String
+  user            User              @relation(fields: [userId], references: [id])
+  customer        Customer          @relation(fields: [customerId], references: [id])
   items           InvoiceItem[]
-  reminders       InvoiceReminder[]
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  invoiceReminder InvoiceReminder[]
 
   @@index([userId])
+  @@index([customerId])
+  @@index([number])
   @@index([status])
+  @@index([date])
   @@index([dueDate])
 }
 
 model InvoiceItem {
   id          String   @id @default(uuid())
-  invoiceId   String
-  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   description String
   quantity    Int
-  unitPrice   Float
+  price       Float
   amount      Float
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
 }
 
+model Payment {
+  id            String        @id @default(uuid())
+  userId        String
+  amount        Float
+  status        PaymentStatus @default(PENDING)
+  promoCode     String?
+  midtransId    String?       @unique
+  paymentUrl    String?
+  paymentMethod String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  user          User          @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([midtransId])
+  @@index([status])
+}
+
+model PromoCode {
+  id            String       @id @default(uuid())
+  code          String       @unique
+  description   String
+  discountType  DiscountType
+  discountValue Float
+  maxUses       Int
+  currentUses   Int          @default(0)
+  startDate     DateTime
+  endDate       DateTime
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([code])
+}
+
+model Settings {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoicePrefix     String?
+  nextInvoiceNumber Int      @default(1)
+  taxRate           Float?
+  licenseKey        String   @unique
+  licenseStatus     String   @default("ACTIVE") // ACTIVE, SUSPENDED
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([licenseKey])
+}
+
 model InvoiceReminder {
-  id          String   @id @default(uuid())
-  invoiceId   String
-  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  sentAt      DateTime @default(now())
-  type        String   // BEFORE_DUE, ON_DUE, AFTER_DUE
-  status      String   // SENT, FAILED
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  sentAt    DateTime @default(now())
+  type      String // BEFORE_DUE, ON_DUE, AFTER_DUE
+  status    String // SENT, FAILED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([invoiceId])
   @@index([type])
   @@index([status])
-} 
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum InvoiceStatus {
+  DRAFT
+  UNPAID
+  PAID
+  SENT
+  OVERDUE
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  EXPIRED
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}

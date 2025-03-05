@@ -1,11 +1,12 @@
 import nodemailer from 'nodemailer';
-import { Invoice, InvoiceItem, User } from '@prisma/client';
+import { Invoice, InvoiceItem, User, Customer } from '@prisma/client';
 import { formatCurrency } from './format';
 import { logger } from './logger';
 
 type InvoiceWithItems = Invoice & {
   items: InvoiceItem[];
   user: Pick<User, 'name' | 'businessName' | 'email'>;
+  customer: Customer;
 };
 
 const transporter = nodemailer.createTransport({
@@ -20,16 +21,15 @@ const transporter = nodemailer.createTransport({
 
 export async function sendInvoiceEmail(invoice: InvoiceWithItems): Promise<void> {
   const {
-    invoiceNumber,
-    customerName,
-    customerEmail,
+    number: invoiceNumber,
     dueDate,
     items,
     subtotal,
-    taxAmount,
+    tax: taxAmount,
     total,
     notes,
     user,
+    customer,
   } = invoice;
 
   const itemsHtml = items
@@ -38,8 +38,8 @@ export async function sendInvoiceEmail(invoice: InvoiceWithItems): Promise<void>
       <tr>
         <td style="padding: 12px; border-bottom: 1px solid #eee;">${item.description}</td>
         <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right;">${item.quantity}</td>
-        <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right;">${formatCurrency(item.unitPrice)}</td>
-        <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right;">${formatCurrency(item.amount)}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right;">${formatCurrency(item.price)}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right;">${formatCurrency(item.price * item.quantity)}</td>
       </tr>
     `
     )
@@ -59,8 +59,8 @@ export async function sendInvoiceEmail(invoice: InvoiceWithItems): Promise<void>
 
       <div style="margin-bottom: 40px;">
         <h3 style="color: #333;">Bill To:</h3>
-        <p style="margin: 5px 0;">${customerName}</p>
-        <p style="margin: 5px 0;">${customerEmail}</p>
+        <p style="margin: 5px 0;">${customer.name}</p>
+        <p style="margin: 5px 0;">${customer.email}</p>
       </div>
 
       <table style="width: 100%; border-collapse: collapse; margin-bottom: 40px;">
@@ -98,7 +98,7 @@ export async function sendInvoiceEmail(invoice: InvoiceWithItems): Promise<void>
 
   await transporter.sendMail({
     from: `"${user.businessName || user.name}" <${user.email}>`,
-    to: customerEmail,
+    to: customer.email!,
     subject: `Invoice ${invoiceNumber} from ${user.businessName || user.name}`,
     html,
   });
@@ -112,11 +112,11 @@ export const sendReminderEmail = async (invoice: InvoiceWithItems) => {
     );
 
     const html = `
-      <h2>Payment Reminder: Invoice ${invoice.invoiceNumber}</h2>
-      <p>Dear ${invoice.customerName},</p>
+      <h2>Payment Reminder: Invoice ${invoice.number}</h2>
+      <p>Dear ${invoice.customer.name},</p>
       
       <p>This is a reminder that the payment for invoice ${
-        invoice.invoiceNumber
+        invoice.number
       } is ${daysOverdue > 0 ? `overdue by ${daysOverdue} days` : 'due today'}.</p>
       
       <p><strong>Amount Due: Rp ${invoice.total.toLocaleString('id-ID')}</strong></p>
@@ -129,12 +129,12 @@ export const sendReminderEmail = async (invoice: InvoiceWithItems) => {
 
     await transporter.sendMail({
       from: `"${businessName}" <${invoice.user.email}>`,
-      to: invoice.customerEmail,
-      subject: `Payment Reminder: Invoice ${invoice.invoiceNumber}`,
+      to: invoice.customer.email!,
+      subject: `Payment Reminder: Invoice ${invoice.number}`,
       html,
     });
 
-    logger.info(`Reminder email sent successfully to ${invoice.customerEmail}`);
+    logger.info(`Reminder email sent successfully to ${invoice.customer.email}`);
   } catch (error) {
     logger.error('Error sending reminder email:', error);
     throw error;

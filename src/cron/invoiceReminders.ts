@@ -28,7 +28,8 @@ export const startReminderCron = () => {
               businessName: true,
               email: true
             }
-          }
+          },
+          customer: true
         }
       });
 
@@ -47,7 +48,7 @@ export const startReminderCron = () => {
           });
 
           // Update invoice status if overdue
-          if (invoice.dueDate < today && invoice.status !== 'OVERDUE') {
+          if (invoice.dueDate < today && invoice.status === 'UNPAID') {
             await prisma.invoice.update({
               where: { id: invoice.id },
               data: { status: 'OVERDUE' }
@@ -72,4 +73,4 @@ export const startReminderCron = () => {
       logger.error('Error in invoice reminder cron job:', error);
     }
   });
-}; 
+};

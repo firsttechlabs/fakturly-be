@@ -17,19 +17,19 @@ const router = Router();
 
 const createInvoiceSchema = z.object({
   customerName: z.string(),
-  customerEmail: z.string().email(),
+  customerEmail: z.string().email().optional(),
   customerPhone: z.string().optional(),
+  issueDate: z.string(),
+  dueDate: z.string(),
   items: z.array(
     z.object({
       description: z.string(),
-      quantity: z.number().min(1),
-      unitPrice: z.number().min(0),
+      quantity: z.number(),
+      unitPrice: z.number(),
     })
   ),
-  dueDate: z.string().or(z.date()),
-  notes: z.string().optional(),
-  taxRate: z.number().min(0).max(100).optional(),
-  currency: z.enum(["IDR", "USD"]).optional(),
+  taxRate: z.number().optional(),
+  customerId: z.string().optional(), // Optional: if customer already exists
 });
 
 const updateInvoiceSchema = z.object({
@@ -49,9 +49,10 @@ router.use(authenticate);
 router.get("/", async (req, res, next) => {
   try {
     const invoices = await prisma.invoice.findMany({
-      where: { userId: req.user!.id },
+      where: { userId: (req as any).user.id },
       include: {
         items: true,
+        customer: true,
       },
       orderBy: {
         createdAt: "desc",
@@ -73,10 +74,11 @@ router.get("/:id", async (req, res, next) => {
     const invoice = await prisma.invoice.findUnique({
       where: {
         id: req.params.id,
-        userId: req.user!.id,
+        userId: (req as any).user.id,
       },
       include: {
         items: true,
+        customer: true,
       },
     });
 
@@ -94,78 +96,92 @@ router.get("/:id", async (req, res, next) => {
 });
 
 // Create invoice
-router.post("/", async (req, res, next) => {
+router.post("/", authenticate, async (req, res, next) => {
   try {
-    const userId = req.user?.id;
-    if (!userId) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
+    const userId = (req as any).user.id;
     const data = createInvoiceSchema.parse(req.body);
-
-    // Get user settings for defaults
-    const userSettings = await prisma.settings.findUnique({
-      where: { userId },
-    });
 
     // Calculate totals
     const subtotal = data.items.reduce(
       (sum, item) => sum + item.quantity * item.unitPrice,
       0
     );
-    const taxRate = data.taxRate ?? userSettings?.taxRate ?? 0;
-    const taxAmount = (subtotal * taxRate) / 100;
-    const total = subtotal + taxAmount;
+    const tax = data.taxRate ? (subtotal * data.taxRate) / 100 : 0;
+    const total = subtotal + tax;
 
-    // Generate invoice number
-    const nextInvoiceNumber = (userSettings?.nextInvoiceNumber || 1)
-      .toString()
-      .padStart(3, "0");
-    const prefix = userSettings?.invoicePrefix || "INV";
-    const invoiceNumber = `${prefix}${nextInvoiceNumber}`;
+    // Get or create customer
+    let customerId = data.customerId;
+    if (!customerId) {
+      // Create new customer
+      const customer = await prisma.customer.create({
+        data: {
+          name: data.customerName,
+          email: data.customerEmail,
+          phone: data.customerPhone,
+          userId,
+        },
+      });
+      customerId = customer.id;
+    }
 
-    // Create invoice
+    // Get next invoice number
+    const settings = await prisma.settings.findUnique({
+      where: { userId },
+    });
+
+    if (!settings) {
+      throw new AppError(400, "User settings not found");
+    }
+
+    const invoicePrefix = settings.invoicePrefix || "INV";
+    const nextNumber = settings.nextInvoiceNumber;
+    const invoiceNumber = `${invoicePrefix}${String(nextNumber).padStart(
+      5,
+      "0"
+    )}`;
+
+    // Create invoice with items
     const invoice = await prisma.invoice.create({
       data: {
-        userId,
-        invoiceNumber,
-        customerName: data.customerName,
-        customerEmail: data.customerEmail,
-        customerPhone: data.customerPhone,
-        currency: data.currency || userSettings?.currency || "IDR",
+        number: invoiceNumber,
+        date: new Date(data.issueDate),
         dueDate: new Date(data.dueDate),
-        notes: data.notes,
         subtotal,
-        taxAmount,
+        tax,
         total,
-          items: {
-            create: data.items.map((item) => ({
-              ...item,
-              amount: item.quantity * item.unitPrice,
-            })),
+        userId,
+        customerId,
+        items: {
+          create: data.items.map((item) => ({
+            description: item.description,
+            quantity: item.quantity,
+            price: item.unitPrice,
+            amount: item.quantity * item.unitPrice,
+          })),
         },
       },
       include: {
         items: true,
+        customer: true,
       },
     });
 
-    // Update next invoice number
+    // Increment invoice number
     await prisma.settings.update({
       where: { userId },
       data: {
-        nextInvoiceNumber: (userSettings?.nextInvoiceNumber || 1) + 1,
+        nextInvoiceNumber: {
+          increment: 1,
+        },
       },
     });
 
-    res.json(invoice);
+    res.json({
+      status: "success",
+      data: invoice,
+    });
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      res.status(400).json({ message: "Invalid input", errors: error.errors });
-    } else {
-      console.error("Error creating invoice:", error);
-      res.status(500).json({ message: "Internal server error" });
-    }
+    next(error);
   }
 });
 
@@ -177,7 +193,7 @@ router.patch("/:id", async (req, res, next) => {
     const invoice = await prisma.invoice.update({
       where: {
         id: req.params.id,
-        userId: req.user!.id,
+        userId: (req as any).user.id,
       },
       data,
       include: {
@@ -200,7 +216,7 @@ router.delete("/:id", async (req, res, next) => {
     await prisma.invoice.delete({
       where: {
         id: req.params.id,
-        userId: req.user!.id,
+        userId: (req as any).user.id,
       },
     });
 
@@ -219,7 +235,7 @@ router.post("/:id/send", async (req, res, next) => {
     const invoice = await prisma.invoice.findUnique({
       where: {
         id: req.params.id,
-        userId: req.user!.id,
+        userId: (req as any).user.id,
       },
       include: {
         items: true,
@@ -230,6 +246,7 @@ router.post("/:id/send", async (req, res, next) => {
             email: true,
           },
         },
+        customer: true,
       },
     });
 
@@ -241,7 +258,7 @@ router.post("/:id/send", async (req, res, next) => {
 
     await prisma.invoice.update({
       where: { id: req.params.id },
-      data: { status: "UNPAID" },
+      data: { status: "SENT" },
     });
 
     res.json({
@@ -256,7 +273,7 @@ router.post("/:id/send", async (req, res, next) => {
 // Get dashboard statistics
 router.get("/stats/overview", authenticate, async (req, res, next) => {
   try {
-    const userId = req.user!.id;
+    const userId = (req as any).user.id;
     const today = new Date();
     const thirtyDaysAgo = subDays(today, 30);
     const startOfCurrentMonth = startOfMonth(today);
@@ -287,23 +304,23 @@ router.get("/stats/overview", authenticate, async (req, res, next) => {
       where: {
         userId,
         status: "PAID",
-        issueDate: {
+        date: {
           gte: thirtyDaysAgo,
           lte: today,
         },
       },
       select: {
-        issueDate: true,
+        date: true,
         total: true,
       },
       orderBy: {
-        issueDate: "asc",
+        date: "asc",
       },
     });
 
     // Group daily revenue by date
     const dailyRevenueGrouped = dailyRevenue.reduce((acc: any[], invoice) => {
-      const date = startOfDay(invoice.issueDate);
+      const date = startOfDay(invoice.date);
       const existingDay = acc.find(
         (day) => day.date.getTime() === date.getTime()
       );
@@ -340,7 +357,7 @@ router.get("/stats/overview", authenticate, async (req, res, next) => {
         where: {
           userId,
           status: "PAID",
-          issueDate: {
+          date: {
             gte: startOfCurrentMonth,
             lte: endOfCurrentMonth,
           },
@@ -351,7 +368,7 @@ router.get("/stats/overview", authenticate, async (req, res, next) => {
         where: {
           userId,
           status: "PAID",
-          issueDate: {
+          date: {
             gte: startOfLastMonth,
             lte: endOfLastMonth,
           },
@@ -398,7 +415,7 @@ router.get("/stats/overview", authenticate, async (req, res, next) => {
 // Get revenue by date range
 router.get("/stats/revenue", authenticate, async (req, res, next) => {
   try {
-    const userId = req.user!.id;
+    const userId = (req as any).user.id;
     const { startDate, endDate } = req.query;
 
     if (!startDate || !endDate) {
@@ -409,10 +426,10 @@ router.get("/stats/revenue", authenticate, async (req, res, next) => {
     const end = endOfDay(new Date(endDate as string));
 
     const revenue = await prisma.invoice.groupBy({
-      by: ["issueDate"],
+      by: ["date"],
       where: {
         userId,
-        issueDate: {
+        date: {
           gte: start,
           lte: end,
         },
@@ -422,7 +439,7 @@ router.get("/stats/revenue", authenticate, async (req, res, next) => {
         total: true,
       },
       orderBy: {
-        issueDate: "asc",
+        date: "asc",
       },
     });
 
