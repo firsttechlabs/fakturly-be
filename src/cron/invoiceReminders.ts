@@ -13,27 +13,29 @@ export const startReminderCron = () => {
       today.setHours(0, 0, 0, 0);
 
       // Get invoices that are due today or overdue
-      const invoices = await prisma.invoice.findMany({
+      const overdueInvoices = await prisma.invoice.findMany({
         where: {
-          status: 'UNPAID',
+          status: "UNPAID",
           dueDate: {
-            lte: today
+            lt: new Date()
           }
         },
         include: {
-          items: true,
           user: {
             select: {
               name: true,
+              email: true,
               businessName: true,
-              email: true
+              address: true,
+              phone: true
             }
           },
-          customer: true
+          customer: true,
+          items: true
         }
       });
 
-      for (const invoice of invoices) {
+      for (const invoice of overdueInvoices) {
         try {
           // Send reminder email
           await sendReminderEmail(invoice);

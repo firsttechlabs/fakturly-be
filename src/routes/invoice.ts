@@ -13,7 +13,7 @@ import { CloudinaryStorage } from "multer-storage-cloudinary";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth";
 import { AppError } from "../middleware/errorHandler";
-import { sendInvoiceEmail } from "../utils/email";
+import { sendInvoiceEmail, sendPaymentProofEmail } from "../utils/email";
 import { prisma } from "../utils/prisma";
 
 // Configure Cloudinary
@@ -131,8 +131,17 @@ router.get("/:id", async (req, res, next) => {
         userId: (req as any).user.id,
       },
       include: {
-        items: true,
+        user: {
+          select: {
+            name: true,
+            email: true,
+            businessName: true,
+            address: true,
+            phone: true
+          }
+        },
         customer: true,
+        items: true
       },
     });
 
@@ -239,7 +248,20 @@ router.post("/:id/payment-proof", upload.single("file"), async (req, res) => {
     }
 
     const invoice = await prisma.invoice.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        user: {
+          select: {
+            name: true,
+            email: true,
+            businessName: true,
+            address: true,
+            phone: true
+          }
+        },
+        customer: true,
+        items: true
+      }
     });
 
     if (!invoice) {
@@ -294,7 +316,20 @@ router.patch("/:id", async (req, res) => {
     }
 
     const invoice = await prisma.invoice.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        user: {
+          select: {
+            name: true,
+            email: true,
+            businessName: true,
+            address: true,
+            phone: true
+          }
+        },
+        customer: true,
+        items: true
+      }
     });
 
     if (!invoice) {
@@ -376,46 +411,49 @@ router.delete("/:id", async (req, res, next) => {
 });
 
 // Send invoice
-router.post("/:id/send", async (req, res, next) => {
+router.post("/:id/send", async (req: Request & { user?: { id: string } }, res) => {
+  const { id } = req.params;
+  const userId = req.user?.id;
+
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
   try {
-    const invoice = await prisma.invoice.findUnique({
+    const invoice = await prisma.invoice.findFirst({
       where: {
-        id: req.params.id,
-        userId: (req as any).user.id,
+        id,
+        userId,
       },
       include: {
+        customer: true,
         items: true,
         user: {
           select: {
             name: true,
-            businessName: true,
             email: true,
-          },
-        },
-        customer: true,
-      },
+            businessName: true,
+            address: true,
+            phone: true
+          }
+        }
+      }
     });
 
     if (!invoice) {
-      throw new AppError(404, "Invoice not found");
-    }
-
-    if (invoice.status === "PAID") {
-      throw new AppError(400, "Paid invoices cannot be sent");
+      throw new Error("Invoice not found");
     }
 
     if (invoice.status === "CANCELLED") {
-      throw new AppError(400, "Cancelled invoices cannot be sent");
+      throw new Error("Cannot send cancelled invoice");
     }
 
     await sendInvoiceEmail(invoice);
 
-    res.json({
-      status: "success",
-      message: "Invoice sent successfully",
-    });
+    res.json({ message: "Invoice sent successfully" });
   } catch (error) {
-    next(error);
+    console.error("Error sending invoice:", error);
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to send invoice" });
   }
 });
 
