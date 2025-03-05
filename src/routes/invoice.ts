@@ -16,20 +16,18 @@ import {
 const router = Router();
 
 const createInvoiceSchema = z.object({
-  customerName: z.string(),
-  customerEmail: z.string().email().optional(),
-  customerPhone: z.string().optional(),
-  issueDate: z.string(),
+  customerId: z.string(),
+  date: z.string(),
   dueDate: z.string(),
   items: z.array(
     z.object({
       description: z.string(),
       quantity: z.number(),
-      unitPrice: z.number(),
+      price: z.number()
     })
   ),
-  taxRate: z.number().optional(),
-  customerId: z.string().optional(), // Optional: if customer already exists
+  notes: z.string().optional(),
+  taxRate: z.number()
 });
 
 const updateInvoiceSchema = z.object({
@@ -103,26 +101,11 @@ router.post("/", authenticate, async (req, res, next) => {
 
     // Calculate totals
     const subtotal = data.items.reduce(
-      (sum, item) => sum + item.quantity * item.unitPrice,
+      (sum, item) => sum + item.quantity * item.price,
       0
     );
-    const tax = data.taxRate ? (subtotal * data.taxRate) / 100 : 0;
+    const tax = (subtotal * data.taxRate) / 100;
     const total = subtotal + tax;
-
-    // Get or create customer
-    let customerId = data.customerId;
-    if (!customerId) {
-      // Create new customer
-      const customer = await prisma.customer.create({
-        data: {
-          name: data.customerName,
-          email: data.customerEmail,
-          phone: data.customerPhone,
-          userId,
-        },
-      });
-      customerId = customer.id;
-    }
 
     // Get next invoice number
     const settings = await prisma.settings.findUnique({
@@ -144,19 +127,20 @@ router.post("/", authenticate, async (req, res, next) => {
     const invoice = await prisma.invoice.create({
       data: {
         number: invoiceNumber,
-        date: new Date(data.issueDate),
+        date: new Date(data.date),
         dueDate: new Date(data.dueDate),
         subtotal,
         tax,
         total,
+        notes: data.notes,
         userId,
-        customerId,
+        customerId: data.customerId,
         items: {
           create: data.items.map((item) => ({
             description: item.description,
             quantity: item.quantity,
-            price: item.unitPrice,
-            amount: item.quantity * item.unitPrice,
+            price: item.price,
+            amount: item.quantity * item.price,
           })),
         },
       },
