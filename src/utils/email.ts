@@ -328,7 +328,7 @@ export async function sendInvoiceEmail(
               </tr>
             </table>
           </td>
-        </tr>
+          </tr>
       </table>
     </body>
     </html>
@@ -382,7 +382,7 @@ export async function sendReminderEmail(
           
           <p style="font-size: 16px; color: #1a1a1a; margin: 16px 0;">
             Ini adalah pengingat bahwa pembayaran untuk faktur ${
-              invoice.number
+        invoice.number
             } 
             ${
               daysOverdue > 0

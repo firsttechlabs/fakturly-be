@@ -7,20 +7,21 @@ import {
   subDays,
   subMonths,
 } from "date-fns";
-import { Request, Router } from "express";
+import { Request, Router, Response } from "express";
 import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth";
 import { AppError } from "../middleware/errorHandler";
 import { sendInvoiceEmail, sendPaymentProofEmail } from "../utils/email";
+import { generateInvoicePDF } from "../utils/pdf";
 import { prisma } from "../utils/prisma";
 
 // Configure Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 const router = Router();
@@ -31,46 +32,51 @@ const storage = new CloudinaryStorage({
   params: async (req: Request, file: Express.Multer.File) => {
     const currentDate = new Date();
     const year = currentDate.getFullYear();
-    const month = String(currentDate.getMonth() + 1).padStart(2, '0');
-    
+    const month = String(currentDate.getMonth() + 1).padStart(2, "0");
+
     // Get invoice ID from params
     const invoiceId = req.params.id;
-    
+
     // Create a structured folder path:
     // fakturly/payment-proofs/YYYY/MM/invoice-id/
     const folderPath = `fakturly/payment-proofs/${year}/${month}/${invoiceId}`;
-    
+
     return {
       folder: folderPath,
       allowed_formats: ["jpg", "jpeg", "png"],
       transformation: [
         { width: 1000, height: 1000, crop: "limit" },
         { quality: "auto" },
-        { fetch_format: "auto" }
+        { fetch_format: "auto" },
       ],
       // Use a more descriptive public_id
       public_id: `proof-${Date.now()}`,
       // Add tags for better organization
-      tags: ['payment-proof', `invoice-${invoiceId}`, `year-${year}`, `month-${month}`]
+      tags: [
+        "payment-proof",
+        `invoice-${invoiceId}`,
+        `year-${year}`,
+        `month-${month}`,
+      ],
     };
-  }
+  },
 });
 
 const upload = multer({
   storage,
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
+    fileSize: 5 * 1024 * 1024, // 5MB limit
   },
   fileFilter: (req: Request, file: Express.Multer.File, cb: any) => {
     const allowedTypes = /jpeg|jpg|png/;
     const mimetype = allowedTypes.test(file.mimetype);
-    
+
     if (mimetype) {
       cb(null, true);
     } else {
       cb(new Error("Hanya file gambar yang diperbolehkan (JPG, JPEG, PNG)"));
     }
-  }
+  },
 });
 
 const createInvoiceSchema = z.object({
@@ -81,11 +87,11 @@ const createInvoiceSchema = z.object({
     z.object({
       description: z.string(),
       quantity: z.number(),
-      price: z.number()
+      price: z.number(),
     })
   ),
   notes: z.string().optional(),
-  taxRate: z.number()
+  taxRate: z.number(),
 });
 
 const updateInvoiceSchema = z.object({
@@ -94,7 +100,11 @@ const updateInvoiceSchema = z.object({
   paymentNote: z.string().nullable().optional(),
   dueDate: z.string().datetime().optional(),
   notes: z.string().optional(),
-  paidAt: z.string().datetime().optional().transform((val) => val ? new Date(val) : undefined),
+  paidAt: z
+    .string()
+    .datetime()
+    .optional()
+    .transform((val) => (val ? new Date(val) : undefined)),
 });
 
 router.use(authenticate);
@@ -137,11 +147,11 @@ router.get("/:id", async (req, res, next) => {
             email: true,
             businessName: true,
             address: true,
-            phone: true
-          }
+            phone: true,
+          },
         },
         customer: true,
-        items: true
+        items: true,
       },
     });
 
@@ -243,7 +253,7 @@ router.post("/:id/payment-proof", upload.single("file"), async (req, res) => {
     if (!file) {
       return res.status(400).json({
         success: false,
-        message: "Tidak ada file yang diunggah"
+        message: "Tidak ada file yang diunggah",
       });
     }
 
@@ -256,32 +266,32 @@ router.post("/:id/payment-proof", upload.single("file"), async (req, res) => {
             email: true,
             businessName: true,
             address: true,
-            phone: true
-          }
+            phone: true,
+          },
         },
         customer: true,
-        items: true
-      }
+        items: true,
+      },
     });
 
     if (!invoice) {
       return res.status(404).json({
         success: false,
-        message: "Faktur tidak ditemukan"
+        message: "Faktur tidak ditemukan",
       });
     }
 
     if (invoice.status === "PAID") {
       return res.status(400).json({
         success: false,
-        message: "Faktur sudah lunas"
+        message: "Faktur sudah lunas",
       });
     }
 
     if (invoice.status === "CANCELLED") {
       return res.status(400).json({
         success: false,
-        message: "Faktur sudah dibatalkan"
+        message: "Faktur sudah dibatalkan",
       });
     }
 
@@ -289,14 +299,14 @@ router.post("/:id/payment-proof", upload.single("file"), async (req, res) => {
     return res.json({
       success: true,
       data: {
-        url: file.path // Cloudinary URL will be in file.path
-      }
+        url: file.path, // Cloudinary URL will be in file.path
+      },
     });
   } catch (error) {
     console.error("Error uploading payment proof:", error);
     return res.status(500).json({
       success: false,
-      message: "Gagal mengunggah bukti pembayaran"
+      message: "Gagal mengunggah bukti pembayaran",
     });
   }
 });
@@ -311,7 +321,7 @@ router.patch("/:id", async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Data tidak valid",
-        errors: updateData.error.errors
+        errors: updateData.error.errors,
       });
     }
 
@@ -324,18 +334,18 @@ router.patch("/:id", async (req, res) => {
             email: true,
             businessName: true,
             address: true,
-            phone: true
-          }
+            phone: true,
+          },
         },
         customer: true,
-        items: true
-      }
+        items: true,
+      },
     });
 
     if (!invoice) {
       return res.status(404).json({
         success: false,
-        message: "Faktur tidak ditemukan"
+        message: "Faktur tidak ditemukan",
       });
     }
 
@@ -343,7 +353,7 @@ router.patch("/:id", async (req, res) => {
     if (invoice.status === "PAID" && updateData.data.status !== "CANCELLED") {
       return res.status(400).json({
         success: false,
-        message: "Faktur yang sudah lunas tidak dapat diubah statusnya"
+        message: "Faktur yang sudah lunas tidak dapat diubah statusnya",
       });
     }
 
@@ -351,21 +361,24 @@ router.patch("/:id", async (req, res) => {
     if (invoice.status === "CANCELLED") {
       return res.status(400).json({
         success: false,
-        message: "Faktur yang sudah dibatalkan tidak dapat diubah"
+        message: "Faktur yang sudah dibatalkan tidak dapat diubah",
       });
     }
 
     // If marking as paid, ensure paidAt is set
-    const finalUpdateData = { 
+    const finalUpdateData = {
       ...updateData.data,
       // Map paymentNote to notes if it exists in the update data
-      notes: 'paymentNote' in updateData.data ? updateData.data.paymentNote : undefined,
+      notes:
+        "paymentNote" in updateData.data
+          ? updateData.data.paymentNote
+          : undefined,
       // Ensure paymentProof is included in the update
-      paymentProof: updateData.data.paymentProof
+      paymentProof: updateData.data.paymentProof,
     };
-    
+
     // Remove paymentNote as it's not a valid field
-    if ('paymentNote' in finalUpdateData) {
+    if ("paymentNote" in finalUpdateData) {
       delete (finalUpdateData as any).paymentNote;
     }
 
@@ -375,18 +388,18 @@ router.patch("/:id", async (req, res) => {
 
     const updatedInvoice = await prisma.invoice.update({
       where: { id },
-      data: finalUpdateData
+      data: finalUpdateData,
     });
 
     return res.json({
       success: true,
-      data: updatedInvoice
+      data: updatedInvoice,
     });
   } catch (error) {
     console.error("Error updating invoice:", error);
     return res.status(500).json({
       success: false,
-      message: "Gagal memperbarui faktur"
+      message: "Gagal memperbarui faktur",
     });
   }
 });
@@ -411,51 +424,59 @@ router.delete("/:id", async (req, res, next) => {
 });
 
 // Send invoice
-router.post("/:id/send", async (req: Request & { user?: { id: string } }, res) => {
-  const { id } = req.params;
-  const userId = req.user?.id;
+router.post(
+  "/:id/send",
+  async (req: Request & { user?: { id: string } }, res) => {
+    const { id } = req.params;
+    const userId = req.user?.id;
 
-  if (!userId) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
-  try {
-    const invoice = await prisma.invoice.findFirst({
-      where: {
-        id,
-        userId,
-      },
-      include: {
-        customer: true,
-        items: true,
-        user: {
-          select: {
-            name: true,
-            email: true,
-            businessName: true,
-            address: true,
-            phone: true
-          }
-        }
+    try {
+      const invoice = await prisma.invoice.findFirst({
+        where: {
+          id,
+          userId,
+        },
+        include: {
+          customer: true,
+          items: true,
+          user: {
+            select: {
+              name: true,
+              email: true,
+              businessName: true,
+              address: true,
+              phone: true,
+            },
+          },
+        },
+      });
+
+      if (!invoice) {
+        throw new Error("Invoice not found");
       }
-    });
 
-    if (!invoice) {
-      throw new Error("Invoice not found");
+      if (invoice.status === "CANCELLED") {
+        throw new Error("Cannot send cancelled invoice");
+      }
+
+      await sendInvoiceEmail(invoice);
+
+      res.json({ message: "Invoice sent successfully" });
+    } catch (error) {
+      console.error("Error sending invoice:", error);
+      res
+        .status(500)
+        .json({
+          error:
+            error instanceof Error ? error.message : "Failed to send invoice",
+        });
     }
-
-    if (invoice.status === "CANCELLED") {
-      throw new Error("Cannot send cancelled invoice");
-    }
-
-    await sendInvoiceEmail(invoice);
-
-    res.json({ message: "Invoice sent successfully" });
-  } catch (error) {
-    console.error("Error sending invoice:", error);
-    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to send invoice" });
   }
-});
+);
 
 // Get dashboard statistics
 router.get("/stats/overview", authenticate, async (req, res, next) => {
@@ -638,5 +659,69 @@ router.get("/stats/revenue", authenticate, async (req, res, next) => {
     next(error);
   }
 });
+
+interface AuthenticatedRequest extends Request {
+  user?: {
+    id: string;
+    email: string;
+  };
+}
+
+// Update print route to POST
+router.post(
+  "/:id/print",
+  authenticate,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params;
+    const userId = req.user?.id;
+
+    try {
+      const invoice = await prisma.invoice.findFirst({
+        where: {
+          id,
+          userId,
+        },
+        include: {
+          customer: true,
+          items: true,
+          user: {
+            select: {
+              name: true,
+              email: true,
+              businessName: true,
+              address: true,
+              phone: true,
+            },
+          },
+        },
+      });
+
+      if (!invoice) {
+        res.status(404).json({
+          success: false,
+          message: "Invoice not found",
+        });
+        return;
+      }
+
+      // Generate PDF and get Cloudinary URL
+      const pdfUrl = await generateInvoicePDF(invoice);
+      
+      // Modify URL to force download
+      const downloadUrl = pdfUrl.replace("/upload/", "/upload/");
+
+      res.json({
+        success: true,
+        url: downloadUrl,
+      });
+    } catch (error) {
+      console.error("Error generating invoice PDF:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
 
 export const invoiceRouter = router;
