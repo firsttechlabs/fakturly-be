@@ -41,7 +41,7 @@ model Customer {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   userId    String
-  user      User      @relation(fields: [userId], references: [id])
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   invoices  Invoice[]
 
   @@index([userId])
@@ -61,8 +61,8 @@ model Invoice {
   updatedAt       DateTime          @updatedAt
   userId          String
   customerId      String
-  user            User              @relation(fields: [userId], references: [id])
-  customer        Customer          @relation(fields: [customerId], references: [id])
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer        Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items           InvoiceItem[]
   invoiceReminder InvoiceReminder[]
 
