@@ -16,8 +16,16 @@ interface MidtransNotification {
   fraud_status?: string;
 }
 
+interface PricingInfo {
+  originalPrice: number;
+  discountedPrice: number;
+  promoCode: string | null;
+  promoDescription: string | null;
+}
+
 export class PaymentService {
   private snap: midtransClient.Snap;
+  private readonly LICENSE_PRICE: number;
 
   constructor() {
     this.snap = new midtransClient.Snap({
@@ -25,6 +33,74 @@ export class PaymentService {
       serverKey: process.env.MIDTRANS_SERVER_KEY!,
       clientKey: process.env.MIDTRANS_CLIENT_KEY!,
     });
+    
+    // Get license price from environment variable with fallback
+    this.LICENSE_PRICE = Number(process.env.LICENSE_PRICE_IDR) || 500000;
+  }
+
+  async getPricingInfo(promoCode?: string): Promise<PricingInfo> {
+    // Default pricing without promo
+    let discountedPrice = this.LICENSE_PRICE;
+    let promoDescription = null;
+    let validPromoCode = null;
+
+    // Only process promo if one is provided
+    if (promoCode?.trim()) {
+      const promo = await prisma.promoCode.findUnique({
+        where: {
+          code: promoCode,
+          isActive: true,
+          startDate: { lte: new Date() },
+          endDate: { gte: new Date() },
+        },
+      });
+
+      if (!promo) {
+        throw new BadRequestError("Kode promo tidak valid atau sudah kadaluarsa");
+      }
+
+      const promoUsage = await prisma.payment.count({
+        where: {
+          promoCode: promo.code,
+          status: "SUCCESS",
+        },
+      });
+
+      if (promoUsage >= promo.maxUses) {
+        throw new BadRequestError("Kuota promo sudah habis");
+      }
+
+      // Calculate discounted price
+      if (promo.discountType === "PERCENTAGE") {
+        discountedPrice = this.LICENSE_PRICE * (1 - promo.discountValue / 100);
+      } else {
+        discountedPrice = this.LICENSE_PRICE - promo.discountValue;
+      }
+      discountedPrice = Math.max(0, discountedPrice); // Ensure price doesn't go negative
+
+      const remainingSlots = promo.maxUses - promoUsage;
+      promoDescription = promo.discountValue === 100
+        ? `Selamat! Anda mendapatkan akses GRATIS (tersisa ${remainingSlots} slot)`
+        : `${promo.description} (tersisa ${remainingSlots} slot)`;
+      validPromoCode = promo.code;
+    }
+
+    return {
+      originalPrice: this.LICENSE_PRICE,
+      discountedPrice,
+      promoCode: validPromoCode,
+      promoDescription,
+    };
+  }
+
+  async calculateFinalPrice(promoCode?: string | null): Promise<number> {
+    // If no promo code provided, return original price
+    if (!promoCode?.trim()) {
+      return this.LICENSE_PRICE;
+    }
+
+    const { discountedPrice } = await this.getPricingInfo(promoCode);
+    return discountedPrice;
   }
 
   async createMidtransPayment(params: MidtransPaymentParams) {
@@ -47,8 +123,10 @@ export class PaymentService {
         email: user.email,
       },
       callbacks: {
-        finish: `${process.env.FRONTEND_URL}/payment/finish`,
-      },
+        finish: `${process.env.FRONTEND_URL}/dashboard`,
+        error: `${process.env.FRONTEND_URL}/payment/${params.orderId}`,
+        pending: `${process.env.FRONTEND_URL}/payment/${params.orderId}`,
+      }
     });
 
     return transaction;
@@ -114,4 +192,4 @@ export class PaymentService {
 
     return !!payment;
   }
-} 
+}

@@ -1,19 +1,28 @@
-import { Router } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { authenticate } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { AppError } from "../middleware/errorHandler";
 import { z } from "zod";
 import { PaymentService } from "../services/payment";
+// @ts-ignore
+import rateLimit from "express-rate-limit";
 
 const router = Router();
 const paymentService = new PaymentService();
 
+// Rate limit for pricing info - 100 requests per 15 minutes
+const pricingRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { status: "error", message: "Too many requests, please try again later" }
+});
+
 const createPaymentSchema = z.object({
-  promoCode: z.string().optional(),
+  promoCode: z.string().nullable().optional(),
 });
 
 // Create payment
-router.post("/create", authenticate, async (req, res, next) => {
+router.post("/create", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { promoCode } = createPaymentSchema.parse(req.body);
     const userId = (req as any).user.id;
@@ -30,57 +39,21 @@ router.post("/create", authenticate, async (req, res, next) => {
       throw new AppError(400, "User already has an active payment");
     }
 
-    const LICENSE_PRICE = Number(process.env.LICENSE_PRICE_IDR) || 500000;
-    let finalPrice = LICENSE_PRICE;
+    // Get final price (will be original price if no promo)
+    const finalPrice = await paymentService.calculateFinalPrice(promoCode);
 
-    // Check promo code if provided
-    if (promoCode) {
-      const promoDetails = await prisma.promoCode.findUnique({
-        where: {
-          code: promoCode,
-          isActive: true,
-          startDate: { lte: new Date() },
-          endDate: { gte: new Date() },
-        },
-      });
+    // Create payment record
+    const payment = await prisma.payment.create({
+      data: {
+        userId,
+        amount: finalPrice,
+        status: finalPrice === 0 ? "SUCCESS" : "PENDING",
+        promoCode: promoCode || null, // Ensure null if no promo
+      },
+    });
 
-      if (!promoDetails) {
-        throw new AppError(400, "Invalid or expired promo code");
-      }
-
-      // Check promo usage
-      const promoUsage = await prisma.payment.count({
-        where: {
-          promoCode: promoCode,
-          status: "SUCCESS",
-        },
-      });
-
-      if (promoUsage >= promoDetails.maxUses) {
-        throw new AppError(400, "Promo code quota exceeded");
-      }
-
-      // Calculate final price after discount
-      if (promoDetails.discountType === "PERCENTAGE") {
-        finalPrice = LICENSE_PRICE * (1 - promoDetails.discountValue / 100);
-      } else {
-        finalPrice = LICENSE_PRICE - promoDetails.discountValue;
-      }
-      finalPrice = Math.max(0, finalPrice); // Ensure price doesn't go negative
-    }
-
-    // If price is 0 (free from promo), create successful payment directly
+    // If price is 0 (free from promo), activate user immediately
     if (finalPrice === 0) {
-      const payment = await prisma.payment.create({
-        data: {
-          userId,
-          amount: 0,
-          status: "SUCCESS",
-          promoCode,
-        },
-      });
-
-      // Activate user
       await prisma.user.update({
         where: { id: userId },
         data: { isActive: true },
@@ -96,29 +69,21 @@ router.post("/create", authenticate, async (req, res, next) => {
     }
 
     // For paid transactions, create Midtrans payment
-    const payment = await prisma.payment.create({
-      data: {
-        userId,
-        amount: finalPrice,
-        status: "PENDING",
-        promoCode,
-      },
-    });
-
     const midtransResponse = await paymentService.createMidtransPayment({
       orderId: payment.id,
       amount: finalPrice,
       userId,
     });
 
+    // Update payment with Midtrans ID
     await prisma.payment.update({
       where: { id: payment.id },
       data: {
-        midtransId: midtransResponse.token,
-        paymentUrl: midtransResponse.redirect_url,
+        midtransId: payment.id,
       },
     });
 
+    // Return consistent response format
     res.json({
       status: "success",
       data: {
@@ -132,63 +97,14 @@ router.post("/create", authenticate, async (req, res, next) => {
 });
 
 // Get pricing info
-router.get("/pricing-info", authenticate, async (req, res, next) => {
+router.get("/pricing-info", [authenticate, pricingRateLimit], async (req: Request, res: Response, next: NextFunction) => {
   try {
     const promoCode = req.query.promoCode as string;
-    const LICENSE_PRICE = Number(process.env.LICENSE_PRICE_IDR) || 500000;
-
-    let discountedPrice = LICENSE_PRICE;
-    let promoDescription = null;
-    let validPromoCode = null;
-
-    if (promoCode) {
-      const promo = await prisma.promoCode.findUnique({
-        where: {
-          code: promoCode,
-          isActive: true,
-          startDate: { lte: new Date() },
-          endDate: { gte: new Date() },
-        },
-      });
-
-      if (!promo) {
-        throw new AppError(400, "Kode promo tidak valid atau sudah kadaluarsa");
-      }
-
-      const promoUsage = await prisma.payment.count({
-        where: {
-          promoCode: promo.code,
-          status: "SUCCESS",
-        },
-      });
-
-      if (promoUsage >= promo.maxUses) {
-        throw new AppError(400, "Kuota promo sudah habis");
-      }
-
-      // Calculate discounted price
-      if (promo.discountType === "PERCENTAGE") {
-        discountedPrice = LICENSE_PRICE * (1 - promo.discountValue / 100);
-      } else {
-        discountedPrice = LICENSE_PRICE - promo.discountValue;
-      }
-      discountedPrice = Math.max(0, discountedPrice); // Ensure price doesn't go negative
-
-      const remainingSlots = promo.maxUses - promoUsage;
-      promoDescription = promo.discountValue === 100 
-        ? `Selamat! Anda mendapatkan akses GRATIS (tersisa ${remainingSlots} slot)`
-        : `${promo.description} (tersisa ${remainingSlots} slot)`;
-      validPromoCode = promo.code;
-    }
+    const pricingInfo = await paymentService.getPricingInfo(promoCode);
 
     res.json({
       status: "success",
-      data: {
-        originalPrice: LICENSE_PRICE,
-        discountedPrice,
-        promoCode: validPromoCode,
-        promoDescription,
-      },
+      data: pricingInfo,
     });
   } catch (error) {
     next(error);
@@ -196,17 +112,25 @@ router.get("/pricing-info", authenticate, async (req, res, next) => {
 });
 
 // Handle Midtrans notification
-router.post("/notification", async (req, res) => {
-  const payment = await paymentService.handleNotification(req.body);
-  res.json({ status: "success", data: payment });
+router.post("/notification", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const payment = await paymentService.handleNotification(req.body);
+    res.json({ status: "success", data: payment });
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Get payment status
-router.get("/status", authenticate, async (req, res) => {
-  const hasValidPayment = await paymentService.getPaymentStatus(
-    (req as any).user.id
-  );
-  res.json({ status: "success", data: { hasValidPayment } });
+router.get("/status", authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const hasValidPayment = await paymentService.getPaymentStatus(
+      (req as any).user.id
+    );
+    res.json({ status: "success", data: { hasValidPayment } });
+  } catch (error) {
+    next(error);
+  }
 });
 
 export { router as paymentRouter };
