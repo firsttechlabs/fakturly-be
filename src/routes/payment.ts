@@ -133,4 +133,19 @@ router.get("/status", authenticate, async (req: Request, res: Response, next: Ne
   }
 });
 
+// Get remaining promo slots
+router.get("/promo-slots/:code", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { code } = req.params;
+    const slots = await paymentService.getRemainingPromoSlots(code);
+
+    res.json({
+      status: "success",
+      data: slots,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export { router as paymentRouter };

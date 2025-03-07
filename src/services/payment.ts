@@ -192,4 +192,30 @@ export class PaymentService {
 
     return !!payment;
   }
+
+  async getRemainingPromoSlots(code: string): Promise<{ remainingSlots: number; totalSlots: number }> {
+    const promo = await prisma.promoCode.findUnique({
+      where: {
+        code,
+        isActive: true,
+      },
+    });
+
+    if (!promo) {
+      throw new BadRequestError("Kode promo tidak ditemukan");
+    }
+
+    // Calculate remaining slots based on successful payments with this promo code
+    const usedSlots = await prisma.payment.count({
+      where: {
+        promoCode: code,
+        status: "SUCCESS",
+      },
+    });
+
+    return {
+      remainingSlots: Math.max(0, promo.maxUses - usedSlots),
+      totalSlots: promo.maxUses
+    };
+  }
 }
