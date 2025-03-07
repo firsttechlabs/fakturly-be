@@ -6,8 +6,18 @@ import { z } from "zod";
 import { AppError } from "../middleware/errorHandler";
 import { prisma } from "../utils/prisma";
 import { authenticate } from "../middleware/auth";
+import { googleClient, GOOGLE_CLIENT_ID } from '../config/google';
+import { BadRequestError } from '../utils/errors';
 
 const router: Router = Router();
+
+const generateToken = (user: { id: string; email: string; role: string }) => {
+  return jwt.sign(
+    { id: user.id, email: user.email, role: user.role },
+    process.env.JWT_SECRET!,
+    { expiresIn: "7d" }
+  );
+};
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -60,11 +70,7 @@ router.post("/register", async (req, res, next) => {
       },
     });
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET!,
-      { expiresIn: "7d" }
-    );
+    const token = generateToken(user);
 
     // Set JWT token in HTTP-only cookie
     res.cookie("token", token, {
@@ -121,11 +127,7 @@ router.post("/login", async (req, res, next) => {
       throw new AppError(403, "Your license has been suspended");
     }
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET!,
-      { expiresIn: "7d" }
-    );
+    const token = generateToken(user);
 
     // Set JWT token in HTTP-only cookie
     res.cookie("token", token, {
@@ -186,6 +188,94 @@ router.post("/logout", (req, res) => {
     status: "success",
     message: "Logged out successfully",
   });
+});
+
+// Google OAuth endpoints
+router.post('/google', async (req, res, next) => {
+  try {
+    const { credential } = req.body;
+    
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: GOOGLE_CLIENT_ID
+    });
+    
+    const payload = ticket.getPayload();
+    if (!payload || !payload.email || !payload.name) {
+      throw new BadRequestError('Invalid token or missing required fields');
+    }
+    
+    const { email, name } = payload;
+    
+    // Find or create user
+    let user = await prisma.user.findUnique({ 
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        businessName: true,
+        role: true,
+        settings: {
+          select: {
+            licenseKey: true,
+          },
+        },
+      },
+    });
+    
+    if (!user) {
+      // Create new user with proper type annotations
+      user = await prisma.user.create({
+        data: {
+          email: email,
+          name: name,
+          password: '', // Empty password for Google users
+          isActive: true,
+          settings: {
+            create: {
+              licenseKey: `GOOGLE-${Date.now()}`,
+              licenseStatus: 'ACTIVE'
+            }
+          }
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          businessName: true,
+          role: true,
+          settings: {
+            select: {
+              licenseKey: true,
+            },
+          },
+        },
+      });
+    }
+
+    if (!user) {
+      throw new BadRequestError('Failed to create or retrieve user');
+    }
+
+    // Generate JWT token with proper type checking
+    const tokenPayload = {
+      id: user.id,
+      email: user.email,
+      role: user.role
+    };
+    const token = generateToken(tokenPayload);
+
+    res.json({
+      status: 'success',
+      data: {
+        user,
+        token
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 export { router as authRouter };
