@@ -463,17 +463,30 @@ router.post(
         throw new Error("Cannot send cancelled invoice");
       }
 
+      // Kirim email faktur
       await sendInvoiceEmail(invoice);
 
-      res.json({ message: "Invoice sent successfully" });
+      // Catat reminder
+      await prisma.invoiceReminder.create({
+        data: {
+          invoiceId: id,
+          type: 'MANUAL',
+          channel: 'EMAIL',
+          status: 'SENT',
+          notes: 'Faktur dikirim via email'
+        }
+      });
+
+      res.json({ 
+        status: "success",
+        message: "Invoice sent successfully" 
+      });
     } catch (error) {
       console.error("Error sending invoice:", error);
-      res
-        .status(500)
-        .json({
-          error:
-            error instanceof Error ? error.message : "Failed to send invoice",
-        });
+      res.status(500).json({
+        status: "error",
+        message: error instanceof Error ? error.message : "Failed to send invoice",
+      });
     }
   }
 );
