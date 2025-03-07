@@ -49,7 +49,7 @@ model Customer {
 
 model Invoice {
   id              String            @id @default(uuid())
-  number          String            @unique
+  number          String
   date            DateTime
   dueDate         DateTime
   status          InvoiceStatus     @default(UNPAID)
@@ -68,6 +68,7 @@ model Invoice {
   items           InvoiceItem[]
   invoiceReminder InvoiceReminder[]
 
+  @@unique([userId, number])
   @@index([userId])
   @@index([customerId])
   @@index([number])
@@ -143,13 +144,16 @@ model InvoiceReminder {
   invoiceId String
   invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   sentAt    DateTime @default(now())
-  type      String // BEFORE_DUE, ON_DUE, AFTER_DUE
-  status    String // SENT, FAILED
+  type      ReminderType // MANUAL, AUTOMATIC
+  channel   ReminderChannel // EMAIL, WHATSAPP
+  status    ReminderStatus // SENT, FAILED
+  notes     String? // For storing additional information
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([invoiceId])
   @@index([type])
+  @@index([channel])
   @@index([status])
 }
 
@@ -175,4 +179,19 @@ enum PaymentStatus {
 enum DiscountType {
   PERCENTAGE
   FIXED
+}
+
+enum ReminderType {
+  MANUAL
+  AUTOMATIC
+}
+
+enum ReminderChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum ReminderStatus {
+  SENT
+  FAILED
 }

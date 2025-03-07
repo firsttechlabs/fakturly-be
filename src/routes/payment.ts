@@ -6,6 +6,7 @@ import { z } from "zod";
 import { PaymentService } from "../services/payment";
 // @ts-ignore
 import rateLimit from "express-rate-limit";
+import { ReminderChannel, ReminderStatus, ReminderType } from "@prisma/client";
 
 const router = Router();
 const paymentService = new PaymentService();
@@ -142,6 +143,63 @@ router.get("/promo-slots/:code", async (req: Request, res: Response, next: NextF
     res.json({
       status: "success",
       data: slots,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get invoice reminder history
+router.get("/invoice/:id/reminders", authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+
+    const reminders = await prisma.invoiceReminder.findMany({
+      where: { invoiceId: id },
+      orderBy: { sentAt: 'desc' },
+    });
+
+    res.json({
+      status: "success",
+      data: reminders,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Record a new reminder
+router.post("/invoice/:id/reminders", authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { type, channel, notes } = req.body;
+
+    // Validate invoice exists and belongs to user
+    const invoice = await prisma.invoice.findFirst({
+      where: {
+        id,
+        userId: (req as any).user.id,
+      },
+    });
+
+    if (!invoice) {
+      throw new AppError(404, "Invoice not found");
+    }
+
+    // Create reminder record
+    const reminder = await prisma.invoiceReminder.create({
+      data: {
+        invoiceId: id,
+        type: type as ReminderType,
+        channel: channel as ReminderChannel,
+        status: ReminderStatus.SENT,
+        notes,
+      },
+    });
+
+    res.json({
+      status: "success",
+      data: reminder,
     });
   } catch (error) {
     next(error);
