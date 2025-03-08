@@ -90,6 +90,7 @@ router.get("/profile", async (req, res, next) => {
         businessPhone: true,
         businessEmail: true,
         isGoogleUser: true,
+        hasPassword: true,
         settings: {
           select: {
             invoicePrefix: true,
@@ -153,6 +154,15 @@ router.patch("/profile", authenticate, async (req, res, next) => {
         );
         if (!validPassword) {
           throw new AppError(400, "Kata sandi saat ini tidak sesuai");
+        }
+
+        // Check if new password is same as current password
+        const isSamePassword = await bcrypt.compare(
+          newPassword,
+          currentUser.password
+        );
+        if (isSamePassword) {
+          throw new AppError(400, "Kata sandi baru tidak boleh sama dengan kata sandi sebelumnya");
         }
       }
 
@@ -253,12 +263,13 @@ router.patch("/profile/password", authenticate, async (req, res, next) => {
     const userId = (req as any).user.id;
     const data = updatePasswordSchema.parse(req.body);
 
-    // Get current user to check if it's a Google user
+    // Get current user to check status
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
       select: {
         isGoogleUser: true,
         password: true,
+        hasPassword: true,
       },
     });
 
@@ -266,12 +277,14 @@ router.patch("/profile/password", authenticate, async (req, res, next) => {
       throw new AppError(404, "Pengguna tidak ditemukan");
     }
 
-    // For non-Google users, verify current password
-    if (!currentUser.isGoogleUser && !data.currentPassword) {
-      throw new AppError(400, "Kata sandi saat ini wajib diisi");
-    }
+    // Verifikasi password lama jika:
+    // 1. User manual (non-Google)
+    // 2. User Google yang sudah pernah set password
+    if (!currentUser.isGoogleUser || (currentUser.isGoogleUser && currentUser.hasPassword)) {
+      if (!data.currentPassword) {
+        throw new AppError(400, "Kata sandi saat ini wajib diisi");
+      }
 
-    if (!currentUser.isGoogleUser && data.currentPassword) {
       const validPassword = await bcrypt.compare(
         data.currentPassword,
         currentUser.password
@@ -279,20 +292,32 @@ router.patch("/profile/password", authenticate, async (req, res, next) => {
       if (!validPassword) {
         throw new AppError(400, "Kata sandi saat ini tidak sesuai");
       }
+
+      // Check if new password is same as current password
+      const isSamePassword = await bcrypt.compare(
+        data.newPassword,
+        currentUser.password
+      );
+      if (isSamePassword) {
+        throw new AppError(400, "Kata sandi baru tidak boleh sama dengan kata sandi sebelumnya");
+      }
     }
 
     // Hash new password
     const hashedPassword = await bcrypt.hash(data.newPassword, 10);
 
-    // Update user password
+    // Update user password and set hasPassword to true
     await prisma.user.update({
       where: { id: userId },
-      data: { password: hashedPassword },
+      data: { 
+        password: hashedPassword,
+        hasPassword: true 
+      },
     });
 
     res.json({
       status: "success",
-      message: "Kata sandi berhasil diperbarui",
+      message: currentUser.hasPassword ? "Kata sandi berhasil diperbarui" : "Kata sandi berhasil diatur",
     });
   } catch (error) {
     next(error);
