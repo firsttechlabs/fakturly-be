@@ -50,6 +50,7 @@ router.post("/register", async (req, res, next) => {
         email: data.email,
         businessName: data.businessName,
         password: hashedPassword,
+        hasPassword: true,
         settings: {
           create: {
             licenseKey,
@@ -61,6 +62,8 @@ router.post("/register", async (req, res, next) => {
         email: true,
         businessName: true,
         role: true,
+        isGoogleUser: true,
+        hasPassword: true,
         settings: {
           select: {
             licenseKey: true,
@@ -219,6 +222,8 @@ router.post('/google', async (req, res, next) => {
         email: true,
         businessName: true,
         role: true,
+        isGoogleUser: true,
+        hasPassword: true,
         settings: {
           select: {
             licenseKey: true,
@@ -236,6 +241,7 @@ router.post('/google', async (req, res, next) => {
           password: '', // Empty password for Google users
           isActive: true,
           isGoogleUser: true,
+          hasPassword: false,
           settings: {
             create: {
               licenseKey: `GOOGLE-${Date.now()}`,
@@ -248,6 +254,8 @@ router.post('/google', async (req, res, next) => {
           email: true,
           businessName: true,
           role: true,
+          isGoogleUser: true,
+          hasPassword: true,
           settings: {
             select: {
               licenseKey: true,
@@ -261,7 +269,6 @@ router.post('/google', async (req, res, next) => {
       throw new BadRequestError('Gagal membuat atau mengambil data pengguna');
     }
 
-    // Generate JWT token with proper type checking
     const tokenPayload = {
       id: user.id,
       email: user.email,
@@ -270,11 +277,11 @@ router.post('/google', async (req, res, next) => {
     const token = generateToken(tokenPayload);
 
     res.json({
-      status: 'success',
+      status: "success",
       data: {
         user,
-        token
-      }
+        token,
+      },
     });
   } catch (error) {
     next(error);

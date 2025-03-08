@@ -115,7 +115,7 @@ router.get("/profile", async (req, res, next) => {
 });
 
 // Update user profile
-router.patch("/profile", async (req, res, next) => {
+router.patch("/profile", authenticate, async (req, res, next) => {
   try {
     const userId = (req as any).user.id;
     const data = updateProfileSchema.parse(req.body);
@@ -125,8 +125,9 @@ router.patch("/profile", async (req, res, next) => {
       where: { id: userId },
       select: {
         isGoogleUser: true,
-        password: true
-      }
+        password: true,
+        hasPassword: true,
+      },
     });
 
     if (!currentUser) {
@@ -139,12 +140,13 @@ router.patch("/profile", async (req, res, next) => {
     // Handle password update if provided
     let passwordUpdate = {};
     if (newPassword) {
-      if (!currentUser.isGoogleUser && !currentPassword) {
+      // For users who have set a password before, require current password
+      if (currentUser.hasPassword && !currentPassword) {
         throw new AppError(400, "Kata sandi saat ini wajib diisi");
       }
 
-      // For non-Google users, verify current password
-      if (!currentUser.isGoogleUser && currentPassword) {
+      // If user has password set, verify current password
+      if (currentUser.hasPassword && currentPassword) {
         const validPassword = await bcrypt.compare(
           currentPassword,
           currentUser.password
@@ -154,9 +156,12 @@ router.patch("/profile", async (req, res, next) => {
         }
       }
 
-      // Hash new password
+      // Hash new password and set hasPassword to true
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      passwordUpdate = { password: hashedPassword };
+      passwordUpdate = {
+        password: hashedPassword,
+        hasPassword: true,
+      };
     }
 
     const updatedUser = await prisma.user.update({
@@ -174,6 +179,7 @@ router.patch("/profile", async (req, res, next) => {
         businessPhone: true,
         businessEmail: true,
         isGoogleUser: true,
+        hasPassword: true,
       },
     });
 
@@ -203,38 +209,43 @@ router.get("/active-count", async (req, res) => {
 });
 
 // Upload business logo
-router.post("/profile/logo", authenticate, upload.single("logo"), async (req, res, next) => {
-  try {
-    if (!req.file) {
-      throw new AppError(400, "Tidak ada file yang diunggah");
+router.post(
+  "/profile/logo",
+  authenticate,
+  upload.single("logo"),
+  async (req, res, next) => {
+    try {
+      if (!req.file) {
+        throw new AppError(400, "Tidak ada file yang diunggah");
+      }
+
+      const userId = (req as any).user.id;
+      const logoUrl = req.file.path;
+
+      // Update user with new logo URL
+      const updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: { businessLogo: logoUrl },
+        select: {
+          id: true,
+          email: true,
+          businessName: true,
+          businessLogo: true,
+          businessAddress: true,
+          businessPhone: true,
+          businessEmail: true,
+        },
+      });
+
+      res.json({
+        status: "success",
+        data: updatedUser,
+      });
+    } catch (error) {
+      next(error);
     }
-
-    const userId = (req as any).user.id;
-    const logoUrl = req.file.path;
-
-    // Update user with new logo URL
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: { businessLogo: logoUrl },
-      select: {
-        id: true,
-        email: true,
-        businessName: true,
-        businessLogo: true,
-        businessAddress: true,
-        businessPhone: true,
-        businessEmail: true,
-      },
-    });
-
-    res.json({
-      status: "success",
-      data: updatedUser,
-    });
-  } catch (error) {
-    next(error);
   }
-});
+);
 
 // Update password endpoint
 router.patch("/profile/password", authenticate, async (req, res, next) => {
@@ -247,8 +258,8 @@ router.patch("/profile/password", authenticate, async (req, res, next) => {
       where: { id: userId },
       select: {
         isGoogleUser: true,
-        password: true
-      }
+        password: true,
+      },
     });
 
     if (!currentUser) {

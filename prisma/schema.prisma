@@ -30,6 +30,7 @@ model User {
   payments       Payment[]
   settings       Settings?
   isGoogleUser   Boolean    @default(false) // To identify if user registered via Google
+  hasPassword    Boolean    @default(false) // To identify if user has set a password
 
   @@index([email])
 }
