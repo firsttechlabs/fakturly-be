@@ -3,11 +3,13 @@ import { ZodError } from 'zod';
 import { logger } from '../utils/logger';
 
 export class AppError extends Error {
-  constructor(
-    public statusCode: number,
-    message: string
-  ) {
+  statusCode: number;
+  data?: any;
+
+  constructor(statusCode: number, message: string, data?: any) {
     super(message);
+    this.statusCode = statusCode;
+    this.data = data;
     this.name = 'AppError';
     Error.captureStackTrace(this, this.constructor);
   }
@@ -31,13 +33,14 @@ export function errorHandler(
     return res.status(err.statusCode).json({
       status: 'error',
       message: err.message,
+      ...(err.data && { data: err.data }),
     });
   }
 
   if (err instanceof ZodError) {
     return res.status(400).json({
       status: 'error',
-      message: 'Validation error',
+      message: 'Data tidak valid',
       errors: err.errors,
     });
   }
@@ -47,7 +50,7 @@ export function errorHandler(
     if ((err as any).code === 'P2002') {
       return res.status(409).json({
         status: 'error',
-        message: 'A record with this value already exists',
+        message: 'Data dengan nilai tersebut sudah ada',
       });
     }
   }
@@ -55,6 +58,6 @@ export function errorHandler(
   // Default error
   return res.status(500).json({
     status: 'error',
-    message: 'Internal server error',
+    message: 'Terjadi kesalahan pada sistem',
   });
 } 

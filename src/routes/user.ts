@@ -41,16 +41,19 @@ const storage = new CloudinaryStorage({
 
 const upload = multer({ storage });
 
+const updatePasswordSchema = z.object({
+  currentPassword: z.string().optional(),
+  newPassword: z.string().min(8, "Kata sandi minimal 8 karakter"),
+});
+
 const updateProfileSchema = z.object({
-  name: z.string().min(2).optional(),
-  businessName: z.string().optional(),
+  businessName: z.string().min(2).optional(),
   businessLogo: z.string().optional(),
   businessAddress: z.string().optional(),
   businessPhone: z.string().optional(),
-  businessEmail: z.string().optional(),
-  phone: z.string().optional(),
+  businessEmail: z.string().email().optional(),
   currentPassword: z.string().optional(),
-  newPassword: z.string().min(8).optional(),
+  newPassword: z.string().min(8, "Kata sandi minimal 8 karakter").optional(),
 });
 
 // Get user count
@@ -86,6 +89,7 @@ router.get("/profile", async (req, res, next) => {
         businessAddress: true,
         businessPhone: true,
         businessEmail: true,
+        isGoogleUser: true,
         settings: {
           select: {
             invoicePrefix: true,
@@ -98,7 +102,7 @@ router.get("/profile", async (req, res, next) => {
     });
 
     if (!user) {
-      throw new AppError(404, "User not found");
+      throw new AppError(404, "Pengguna tidak ditemukan");
     }
 
     res.json({
@@ -116,58 +120,51 @@ router.patch("/profile", async (req, res, next) => {
     const userId = (req as any).user.id;
     const data = updateProfileSchema.parse(req.body);
 
-    // If password change is requested
-    if (data.currentPassword && data.newPassword) {
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-      });
-
-      if (!user) {
-        throw new AppError(404, "User not found");
+    // Get current user to check if it's a Google user
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        isGoogleUser: true,
+        password: true
       }
+    });
 
-      const validPassword = await bcrypt.compare(
-        data.currentPassword,
-        user.password
-      );
-      if (!validPassword) {
-        throw new AppError(400, "Current password is incorrect");
-      }
-
-      const hashedPassword = await bcrypt.hash(data.newPassword, 10);
-
-      // Remove password fields from data
-      const { currentPassword, newPassword, ...updateData } = data;
-
-      const updatedUser = await prisma.user.update({
-        where: { id: userId },
-        data: {
-          ...updateData,
-          password: hashedPassword,
-        },
-        select: {
-          id: true,
-          email: true,
-          businessName: true,
-          businessLogo: true,
-          businessAddress: true,
-          businessPhone: true,
-          businessEmail: true,
-        },
-      });
-
-      return res.json({
-        status: "success",
-        data: updatedUser,
-      });
+    if (!currentUser) {
+      throw new AppError(404, "Pengguna tidak ditemukan");
     }
 
-    // Regular profile update without password change
+    // Remove password fields from data before update
     const { currentPassword, newPassword, ...updateData } = data;
+
+    // Handle password update if provided
+    let passwordUpdate = {};
+    if (newPassword) {
+      if (!currentUser.isGoogleUser && !currentPassword) {
+        throw new AppError(400, "Kata sandi saat ini wajib diisi");
+      }
+
+      // For non-Google users, verify current password
+      if (!currentUser.isGoogleUser && currentPassword) {
+        const validPassword = await bcrypt.compare(
+          currentPassword,
+          currentUser.password
+        );
+        if (!validPassword) {
+          throw new AppError(400, "Kata sandi saat ini tidak sesuai");
+        }
+      }
+
+      // Hash new password
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      passwordUpdate = { password: hashedPassword };
+    }
 
     const updatedUser = await prisma.user.update({
       where: { id: userId },
-      data: updateData,
+      data: {
+        ...updateData,
+        ...passwordUpdate,
+      },
       select: {
         id: true,
         email: true,
@@ -176,6 +173,7 @@ router.patch("/profile", async (req, res, next) => {
         businessAddress: true,
         businessPhone: true,
         businessEmail: true,
+        isGoogleUser: true,
       },
     });
 
@@ -208,7 +206,7 @@ router.get("/active-count", async (req, res) => {
 router.post("/profile/logo", authenticate, upload.single("logo"), async (req, res, next) => {
   try {
     if (!req.file) {
-      throw new AppError(400, "No file uploaded");
+      throw new AppError(400, "Tidak ada file yang diunggah");
     }
 
     const userId = (req as any).user.id;
@@ -232,6 +230,58 @@ router.post("/profile/logo", authenticate, upload.single("logo"), async (req, re
     res.json({
       status: "success",
       data: updatedUser,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update password endpoint
+router.patch("/profile/password", authenticate, async (req, res, next) => {
+  try {
+    const userId = (req as any).user.id;
+    const data = updatePasswordSchema.parse(req.body);
+
+    // Get current user to check if it's a Google user
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        isGoogleUser: true,
+        password: true
+      }
+    });
+
+    if (!currentUser) {
+      throw new AppError(404, "Pengguna tidak ditemukan");
+    }
+
+    // For non-Google users, verify current password
+    if (!currentUser.isGoogleUser && !data.currentPassword) {
+      throw new AppError(400, "Kata sandi saat ini wajib diisi");
+    }
+
+    if (!currentUser.isGoogleUser && data.currentPassword) {
+      const validPassword = await bcrypt.compare(
+        data.currentPassword,
+        currentUser.password
+      );
+      if (!validPassword) {
+        throw new AppError(400, "Kata sandi saat ini tidak sesuai");
+      }
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(data.newPassword, 10);
+
+    // Update user password
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    res.json({
+      status: "success",
+      message: "Kata sandi berhasil diperbarui",
     });
   } catch (error) {
     next(error);

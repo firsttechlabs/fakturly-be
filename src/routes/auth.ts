@@ -39,7 +39,7 @@ router.post("/register", async (req, res, next) => {
     });
 
     if (existingUser) {
-      throw new AppError(409, "Email already registered");
+      throw new AppError(409, "Email sudah terdaftar");
     }
 
     const hashedPassword = await bcrypt.hash(data.password, 10);
@@ -103,6 +103,7 @@ router.post("/login", async (req, res, next) => {
         password: true,
         businessName: true,
         role: true,
+        isGoogleUser: true,
         settings: {
           select: {
             licenseKey: true,
@@ -113,16 +114,21 @@ router.post("/login", async (req, res, next) => {
     });
 
     if (!user) {
-      throw new AppError(401, "Invalid credentials");
+      throw new AppError(401, "Email atau kata sandi tidak valid");
+    }
+
+    // Check if this is a Google user without password
+    if (user.isGoogleUser && !user.password) {
+      throw new AppError(401, "Silakan masuk menggunakan akun Google", { isGoogleUser: true });
     }
 
     const validPassword = await bcrypt.compare(data.password, user.password);
     if (!validPassword) {
-      throw new AppError(401, "Invalid credentials");
+      throw new AppError(401, "Email atau kata sandi tidak valid");
     }
 
     if (user.settings?.licenseStatus === "SUSPENDED") {
-      throw new AppError(403, "Your license has been suspended");
+      throw new AppError(403, "Lisensi Anda telah dinonaktifkan. Silakan hubungi admin.");
     }
 
     const token = generateToken(user);
@@ -168,7 +174,7 @@ router.get("/me", authenticate, async (req, res, next) => {
     });
 
     if (!user) {
-      throw new AppError(404, "User not found");
+      throw new AppError(404, "Pengguna tidak ditemukan");
     }
 
     res.json({
@@ -200,7 +206,7 @@ router.post('/google', async (req, res, next) => {
     
     const payload = ticket.getPayload();
     if (!payload || !payload.email) {
-      throw new BadRequestError('Invalid token or missing required fields');
+      throw new BadRequestError('Token tidak valid atau data yang diperlukan tidak lengkap');
     }
     
     const { email } = payload;
@@ -252,7 +258,7 @@ router.post('/google', async (req, res, next) => {
     }
 
     if (!user) {
-      throw new BadRequestError('Failed to create or retrieve user');
+      throw new BadRequestError('Gagal membuat atau mengambil data pengguna');
     }
 
     // Generate JWT token with proper type checking
