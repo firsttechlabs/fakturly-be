@@ -7,7 +7,7 @@ import {
   subDays,
   subMonths,
 } from "date-fns";
-import { Request, Router, Response } from "express";
+import { Request, Router, Response, NextFunction } from "express";
 import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
 import { z } from "zod";
@@ -16,6 +16,7 @@ import { AppError } from "../middleware/errorHandler";
 import { sendInvoiceEmail, sendPaymentProofEmail } from "../utils/email";
 import { generateInvoicePDF } from "../utils/pdf";
 import { prisma } from "../utils/prisma";
+import { AuthenticatedRequest } from "../types/express";
 
 // Configure Cloudinary
 cloudinary.config({
@@ -127,28 +128,106 @@ const userSelect = {
   },
 };
 
-// Get all invoices
-router.get("/", async (req, res, next) => {
+// Add query parameter validation
+const getInvoicesQuerySchema = z.object({
+  page: z.string().transform(Number).default('1'),
+  limit: z.string().transform(Number).default('10'),
+  search: z.string().optional(),
+  status: z.enum(['UNPAID', 'PAID', 'OVERDUE', 'CANCELLED']).optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  sortBy: z.enum(['date', 'dueDate', 'total', 'status']).default('date'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+});
+
+// Get all invoices with pagination and filters
+router.get("/", authenticate, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const invoices = await prisma.invoice.findMany({
-      where: {
-        userId: (req as any).user.id,
-      },
-      include: {
-        items: true,
-        user: {
-          select: userSelect,
+    const { 
+      page, 
+      limit, 
+      search, 
+      status, 
+      startDate, 
+      endDate,
+      sortBy,
+      sortOrder 
+    } = getInvoicesQuerySchema.parse(req.query);
+
+    // Build where clause
+    const where: any = {
+      userId: req.user?.id,
+    };
+
+    // Add search condition
+    if (search) {
+      where.OR = [
+        { number: { contains: search, mode: 'insensitive' } },
+        { customer: { name: { contains: search, mode: 'insensitive' } } },
+        { total: isNaN(Number(search)) ? undefined : Number(search) },
+        {
+          date: isNaN(Date.parse(search)) ? undefined : {
+            equals: new Date(search)
+          }
         },
-        customer: true,
+        {
+          dueDate: isNaN(Date.parse(search)) ? undefined : {
+            equals: new Date(search)
+          }
+        }
+      ].filter(condition => condition !== undefined);
+    }
+
+    // Add status filter
+    if (status) {
+      where.status = status;
+    }
+
+    // Add date range filter
+    if (startDate) {
+      where.date = {
+        ...where.date,
+        gte: new Date(startDate),
+      };
+    }
+    if (endDate) {
+      where.date = {
+        ...where.date,
+        lte: new Date(endDate),
+      };
+    }
+
+    // Get total count
+    const total = await prisma.invoice.count({ where });
+
+    // Get paginated results
+    const invoices = await prisma.invoice.findMany({
+      where,
+      include: {
+        customer: {
+          select: {
+            name: true,
+          },
+        },
       },
       orderBy: {
-        createdAt: "desc",
+        [sortBy]: sortOrder,
       },
+      skip: (page - 1) * limit,
+      take: limit,
     });
 
     res.json({
       status: "success",
-      data: invoices,
+      data: {
+        invoices,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
     });
   } catch (error) {
     next(error);
@@ -672,13 +751,6 @@ router.get("/stats/revenue", authenticate, async (req, res, next) => {
     next(error);
   }
 });
-
-interface AuthenticatedRequest extends Request {
-  user?: {
-    id: string;
-    email: string;
-  };
-}
 
 // Update print route to POST
 router.post(

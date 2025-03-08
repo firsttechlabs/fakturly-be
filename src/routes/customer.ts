@@ -1,8 +1,9 @@
-import { Router } from "express";
-import { authenticate } from "../middleware/auth";
-import { prisma } from "../utils/prisma";
-import { AppError } from "../middleware/errorHandler";
+import { NextFunction, Response, Router } from "express";
 import { z } from "zod";
+import { authenticate } from "../middleware/auth";
+import { AppError } from "../middleware/errorHandler";
+import { AuthenticatedRequest } from "../types/express";
+import { prisma } from "../utils/prisma";
 
 const router = Router();
 
@@ -16,32 +17,73 @@ const createCustomerSchema = z.object({
 
 const updateCustomerSchema = createCustomerSchema.partial();
 
+// Add query parameter validation
+const getCustomersQuerySchema = z.object({
+  page: z.string().transform(Number).default('1'),
+  limit: z.string().transform(Number).default('10'),
+  search: z.string().optional(),
+  sortBy: z.enum(['name', 'email', 'phone', 'createdAt']).default('createdAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+});
+
 router.use(authenticate);
 
-// Get all customers
-router.get("/", async (req, res, next) => {
+// Get all customers with pagination and search
+router.get("/", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
+    const { 
+      page, 
+      limit, 
+      search,
+      sortBy,
+      sortOrder 
+    } = getCustomersQuerySchema.parse(req.query);
+
+    // Build where clause
+    const where: any = {
+      userId: req.user?.id,
+    };
+
+    // Add search condition
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    // Get total count for search results
+    const total = await prisma.customer.count({ where });
+
+    // Get paginated results with invoice count
     const customers = await prisma.customer.findMany({
-      where: { userId: (req as any).user.id },
-      orderBy: { name: "asc" },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        address: true,
-        notes: true,
-        createdAt: true,
-        updatedAt: true,
-        _count: {
-          select: { invoices: true }
-        }
-      }
+      where,
+      include: {
+        invoices: {
+          select: {
+            id: true,
+          },
+        },
+      },
+      orderBy: {
+        [sortBy]: sortOrder,
+      },
+      skip: (page - 1) * limit,
+      take: limit,
     });
 
     res.json({
       status: "success",
-      data: customers,
+      data: {
+        customers,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
     });
   } catch (error) {
     next(error);
