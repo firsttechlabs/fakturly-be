@@ -11,22 +11,25 @@ datasource db {
 }
 
 model User {
-  id           String     @id @default(uuid())
-  name         String
-  email        String     @unique
-  password     String
-  businessName String?
-  businessLogo String?
-  address      String?
-  phone        String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  isActive     Boolean    @default(true)
-  role         Role       @default(USER)
-  invoices     Invoice[]
-  customers    Customer[]
-  payments     Payment[]
-  settings     Settings?
+  id             String     @id @default(uuid())
+  email          String     @unique
+  password       String
+  businessName   String     // Required, used as primary identifier
+  avatar         String?    // Optional user avatar
+  businessLogo   String?    // Optional business logo
+  businessEmail  String?    // Optional business email for invoices
+  businessPhone  String?    // Optional business contact
+  businessAddress String?   // Optional business address
+  personalPhone  String?    // Optional personal contact
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  isActive       Boolean    @default(true)
+  role           Role       @default(USER)
+  invoices       Invoice[]
+  customers      Customer[]
+  payments       Payment[]
+  settings       Settings?
+  isGoogleUser   Boolean    @default(false) // To identify if user registered via Google
 
   @@index([email])
 }

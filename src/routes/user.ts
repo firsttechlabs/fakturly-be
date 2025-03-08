@@ -4,13 +4,50 @@ import { prisma } from "../utils/prisma";
 import { authenticate } from "../middleware/auth";
 import { AppError } from "../middleware/errorHandler";
 import bcrypt from "bcryptjs";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
+import multer from "multer";
+import { v2 as cloudinary } from "cloudinary";
 
 const router = Router();
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// Configure multer with Cloudinary storage
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: async (req: Request, file: Express.Multer.File) => {
+    const currentDate = new Date();
+    const year = currentDate.getFullYear();
+    const month = String(currentDate.getMonth() + 1).padStart(2, "0");
+    const userId = (req as any).user.id;
+
+    return {
+      folder: `fakturly/settings/profile/${year}/${month}/${userId}`,
+      allowed_formats: ["jpg", "jpeg", "png"],
+      transformation: [
+        { width: 500, height: 500, crop: "limit" },
+        { quality: "auto" },
+        { fetch_format: "auto" },
+      ],
+      public_id: `logo-${Date.now()}`,
+    };
+  },
+});
+
+const upload = multer({ storage });
 
 const updateProfileSchema = z.object({
   name: z.string().min(2).optional(),
   businessName: z.string().optional(),
-  address: z.string().optional(),
+  businessLogo: z.string().optional(),
+  businessAddress: z.string().optional(),
+  businessPhone: z.string().optional(),
+  businessEmail: z.string().optional(),
   phone: z.string().optional(),
   currentPassword: z.string().optional(),
   newPassword: z.string().min(8).optional(),
@@ -44,10 +81,11 @@ router.get("/profile", async (req, res, next) => {
       select: {
         id: true,
         email: true,
-        name: true,
         businessName: true,
-        address: true,
-        phone: true,
+        businessLogo: true,
+        businessAddress: true,
+        businessPhone: true,
+        businessEmail: true,
         settings: {
           select: {
             invoicePrefix: true,
@@ -110,10 +148,11 @@ router.patch("/profile", async (req, res, next) => {
         select: {
           id: true,
           email: true,
-          name: true,
           businessName: true,
-          address: true,
-          phone: true,
+          businessLogo: true,
+          businessAddress: true,
+          businessPhone: true,
+          businessEmail: true,
         },
       });
 
@@ -132,10 +171,11 @@ router.patch("/profile", async (req, res, next) => {
       select: {
         id: true,
         email: true,
-        name: true,
         businessName: true,
-        address: true,
-        phone: true,
+        businessLogo: true,
+        businessAddress: true,
+        businessPhone: true,
+        businessEmail: true,
       },
     });
 
@@ -161,6 +201,40 @@ router.get("/active-count", async (req, res) => {
   } catch (error) {
     console.error("Error getting active user count:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Upload business logo
+router.post("/profile/logo", authenticate, upload.single("logo"), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      throw new AppError(400, "No file uploaded");
+    }
+
+    const userId = (req as any).user.id;
+    const logoUrl = req.file.path;
+
+    // Update user with new logo URL
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { businessLogo: logoUrl },
+      select: {
+        id: true,
+        email: true,
+        businessName: true,
+        businessLogo: true,
+        businessAddress: true,
+        businessPhone: true,
+        businessEmail: true,
+      },
+    });
+
+    res.json({
+      status: "success",
+      data: updatedUser,
+    });
+  } catch (error) {
+    next(error);
   }
 });
 

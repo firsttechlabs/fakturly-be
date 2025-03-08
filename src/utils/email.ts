@@ -18,6 +18,9 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  tls: {
+    rejectUnauthorized: false
+  }
 });
 
 export function formatDate(date: Date): string {
@@ -50,7 +53,7 @@ function getStatusColor(status: InvoiceStatus): string {
 
 type InvoiceWithItems = Invoice & {
   items: InvoiceItem[];
-  user: Pick<User, "name" | "businessName" | "email" | "phone" | "address">;
+  user: Pick<User, "businessName" | "businessEmail" | "businessPhone" | "businessAddress" | "businessLogo">;
   customer: Customer;
 };
 
@@ -81,6 +84,25 @@ export async function sendInvoiceEmail(
 
   const statusText = getStatusText(status);
   const statusColor = getStatusColor(status);
+
+  // Prepare business info section
+  const businessInfoSection = `
+    <div class="section-title">Informasi Bisnis</div>
+    <div class="detail-label">Nama Usaha</div>
+    <div class="detail-value">${user.businessName}</div>
+    ${user.businessEmail ? `
+    <div class="detail-label">Email Bisnis</div>
+    <div class="detail-value">${user.businessEmail}</div>
+    ` : ''}
+    ${user.businessPhone ? `
+    <div class="detail-label">Telepon Bisnis</div>
+    <div class="detail-value">${user.businessPhone}</div>
+    ` : ''}
+    ${user.businessAddress ? `
+    <div class="detail-label">Alamat Bisnis</div>
+    <div class="detail-value">${user.businessAddress}</div>
+    ` : ''}
+  `;
 
   const html = `
     <!DOCTYPE html>
@@ -171,12 +193,15 @@ export async function sendInvoiceEmail(
       <table class="main-table" cellpadding="0" cellspacing="0" border="0" align="center">
         <tr>
           <td style="padding: 24px;">
-            <!-- Header -->
+            <!-- Header with Logo -->
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td align="center" style="padding-bottom: 20px; border-bottom: 1px solid #E2E8F0;">
-                  <div style="font-size: 22px; font-weight: bold; color: #1976D2;">FAKTURLY</div>
-                  <div style="font-size: 13px; color: #718096;">Solusi Pencatatan Faktur & Reminder Pembayaran</div>
+                  ${user.businessLogo ? `
+                    <img src="${user.businessLogo}" alt="${user.businessName}" style="max-width: 200px; max-height: 80px; margin-bottom: 12px;">
+                  ` : `
+                    <div style="font-size: 22px; font-weight: bold; color: #1976D2;">${user.businessName}</div>
+                  `}
                 </td>
               </tr>
             </table>
@@ -185,7 +210,9 @@ export async function sendInvoiceEmail(
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 20px;">
               <tr>
                 <td style="background: #F8FAFC; padding: 16px; border-radius: 4px;">
-                  <div style="font-size: 16px; font-weight: 600; color: #2D3748; margin-bottom: 8px;">Faktur #${number}</div>
+                  <div style="font-size: 16px; font-weight: 600; color: #2D3748; margin-bottom: 8px;">
+                    Faktur #${number}
+                  </div>
                   <div class="status-badge">${statusText}</div>
                 </td>
               </tr>
@@ -195,23 +222,17 @@ export async function sendInvoiceEmail(
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 20px;">
               <tr>
                 <td width="48%" valign="top">
-                  <div class="section-title">Informasi Bisnis</div>
-                  <div class="detail-label">Nama</div>
-                  <div class="detail-value">${user.businessName || user.name}</div>
-                  ${user.address ? `
-                  <div class="detail-label">Alamat</div>
-                  <div class="detail-value">${user.address}</div>
-                  ` : ''}
-                  ${user.phone ? `
-                  <div class="detail-label">Telepon</div>
-                  <div class="detail-value">${user.phone}</div>
-                  ` : ''}
+                  ${businessInfoSection}
                 </td>
                 <td width="4%"></td>
                 <td width="48%" valign="top">
                   <div class="section-title">Informasi Pelanggan</div>
                   <div class="detail-label">Nama</div>
                   <div class="detail-value">${customer.name}</div>
+                  ${customer.email ? `
+                  <div class="detail-label">Email</div>
+                  <div class="detail-value">${customer.email}</div>
+                  ` : ''}
                   ${customer.address ? `
                   <div class="detail-label">Alamat</div>
                   <div class="detail-value">${customer.address}</div>
@@ -328,14 +349,14 @@ export async function sendInvoiceEmail(
               </tr>
             </table>
           </td>
-          </tr>
+        </tr>
       </table>
     </body>
     </html>
   `;
 
   const mailOptions = {
-    from: `"${user.businessName || user.name}" <${process.env.SMTP_USER}>`,
+    from: `"${user.businessName}" <${process.env.SMTP_USER}>`,
     to: customer.email,
     subject: `Faktur #${number} ${status === 'PAID' ? '(LUNAS)' : ''}`,
     html,
@@ -354,7 +375,7 @@ export async function sendReminderEmail(
   invoice: InvoiceWithItems
 ): Promise<void> {
   try {
-    const businessName = invoice.user.businessName || invoice.user.name;
+    const businessName = invoice.user.businessName || invoice.user.businessName;
     const daysOverdue = Math.floor(
       (new Date().getTime() - invoice.dueDate.getTime()) / (1000 * 60 * 60 * 24)
     );
@@ -372,6 +393,12 @@ export async function sendReminderEmail(
       </head>
       <body>
         <div style="max-width: 800px; margin: 0 auto; padding: 40px 24px; background: white;">
+          ${invoice.user.businessLogo ? `
+            <div style="text-align: center; margin-bottom: 24px;">
+              <img src="${invoice.user.businessLogo}" alt="${businessName}" style="max-width: 200px; max-height: 80px;">
+            </div>
+          ` : ''}
+          
           <h1 style="font-size: 24px; font-weight: 600; color: #1976d2; margin: 0 0 32px 0;">
             Pengingat Pembayaran: Faktur ${invoice.number}
           </h1>
@@ -381,9 +408,7 @@ export async function sendReminderEmail(
           </p>
           
           <p style="font-size: 16px; color: #1a1a1a; margin: 16px 0;">
-            Ini adalah pengingat bahwa pembayaran untuk faktur ${
-        invoice.number
-            } 
+            Ini adalah pengingat bahwa pembayaran untuk faktur ${invoice.number} 
             ${
               daysOverdue > 0
                 ? `telah jatuh tempo ${daysOverdue} hari`
@@ -452,6 +477,8 @@ export async function sendPaymentProofEmail(
     throw new Error("No payment proof available");
   }
 
+  const businessName = user.businessName || user.businessName;
+
   const html = `
     <!DOCTYPE html>
     <html>
@@ -465,6 +492,12 @@ export async function sendPaymentProofEmail(
     </head>
     <body>
       <div style="max-width: 800px; margin: 0 auto; padding: 40px 24px; background: white;">
+        ${user.businessLogo ? `
+          <div style="text-align: center; margin-bottom: 24px;">
+            <img src="${user.businessLogo}" alt="${businessName}" style="max-width: 200px; max-height: 80px;">
+          </div>
+        ` : ''}
+
         <h1 style="font-size: 24px; font-weight: 600; color: #1a1a1a; margin: 0 0 32px 0;">
           Bukti Pembayaran: Faktur ${invoiceNumber}
         </h1>
@@ -499,7 +532,7 @@ export async function sendPaymentProofEmail(
 
         <div style="text-align: center; padding-top: 40px; border-top: 1px solid #eee;">
           <p style="font-size: 14px; color: #666; margin: 0;">
-            Email ini dikirim oleh ${user.businessName || user.name}
+            Email ini dikirim oleh ${businessName}
           </p>
         </div>
       </div>
@@ -508,7 +541,7 @@ export async function sendPaymentProofEmail(
   `;
 
   await transporter.sendMail({
-    from: `"${user.businessName || user.name}" <${process.env.SMTP_USER}>`,
+    from: `"${businessName}" <${process.env.SMTP_USER}>`,
     to: customer.email!,
     subject: `Bukti Pembayaran: Faktur ${invoiceNumber}`,
     html,

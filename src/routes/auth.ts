@@ -22,8 +22,7 @@ const generateToken = (user: { id: string; email: string; role: string }) => {
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
-  name: z.string().min(2),
-  businessName: z.string().optional(),
+  businessName: z.string().min(2),
 });
 
 const loginSchema = z.object({
@@ -48,7 +47,8 @@ router.post("/register", async (req, res, next) => {
 
     const user = await prisma.user.create({
       data: {
-        ...data,
+        email: data.email,
+        businessName: data.businessName,
         password: hashedPassword,
         settings: {
           create: {
@@ -59,7 +59,6 @@ router.post("/register", async (req, res, next) => {
       select: {
         id: true,
         email: true,
-        name: true,
         businessName: true,
         role: true,
         settings: {
@@ -102,7 +101,6 @@ router.post("/login", async (req, res, next) => {
         id: true,
         email: true,
         password: true,
-        name: true,
         businessName: true,
         role: true,
         settings: {
@@ -158,8 +156,8 @@ router.get("/me", authenticate, async (req, res, next) => {
       select: {
         id: true,
         email: true,
-        name: true,
         businessName: true,
+        businessLogo: true,
         settings: {
           select: {
             licenseKey: true,
@@ -201,11 +199,11 @@ router.post('/google', async (req, res, next) => {
     });
     
     const payload = ticket.getPayload();
-    if (!payload || !payload.email || !payload.name) {
+    if (!payload || !payload.email) {
       throw new BadRequestError('Invalid token or missing required fields');
     }
     
-    const { email, name } = payload;
+    const { email } = payload;
     
     // Find or create user
     let user = await prisma.user.findUnique({ 
@@ -213,7 +211,6 @@ router.post('/google', async (req, res, next) => {
       select: {
         id: true,
         email: true,
-        name: true,
         businessName: true,
         role: true,
         settings: {
@@ -229,9 +226,10 @@ router.post('/google', async (req, res, next) => {
       user = await prisma.user.create({
         data: {
           email: email,
-          name: name,
+          businessName: email.split('@')[0], // Use email prefix as business name
           password: '', // Empty password for Google users
           isActive: true,
+          isGoogleUser: true,
           settings: {
             create: {
               licenseKey: `GOOGLE-${Date.now()}`,
@@ -242,7 +240,6 @@ router.post('/google', async (req, res, next) => {
         select: {
           id: true,
           email: true,
-          name: true,
           businessName: true,
           role: true,
           settings: {

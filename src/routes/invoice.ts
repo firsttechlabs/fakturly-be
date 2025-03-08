@@ -109,13 +109,36 @@ const updateInvoiceSchema = z.object({
 
 router.use(authenticate);
 
+// Update user select in all queries
+const userSelect = {
+  id: true,
+  email: true,
+  businessName: true,
+  businessEmail: true,
+  businessPhone: true,
+  businessAddress: true,
+  businessLogo: true,
+  role: true,
+  settings: {
+    select: {
+      licenseKey: true,
+      licenseStatus: true,
+    },
+  },
+};
+
 // Get all invoices
 router.get("/", async (req, res, next) => {
   try {
     const invoices = await prisma.invoice.findMany({
-      where: { userId: (req as any).user.id },
+      where: {
+        userId: (req as any).user.id,
+      },
       include: {
         items: true,
+        user: {
+          select: userSelect,
+        },
         customer: true,
       },
       orderBy: {
@@ -142,13 +165,7 @@ router.get("/:id", async (req, res, next) => {
       },
       include: {
         user: {
-          select: {
-            name: true,
-            email: true,
-            businessName: true,
-            address: true,
-            phone: true,
-          },
+          select: userSelect,
         },
         customer: true,
         items: true,
@@ -261,13 +278,7 @@ router.post("/:id/payment-proof", upload.single("file"), async (req, res) => {
       where: { id },
       include: {
         user: {
-          select: {
-            name: true,
-            email: true,
-            businessName: true,
-            address: true,
-            phone: true,
-          },
+          select: userSelect,
         },
         customer: true,
         items: true,
@@ -329,13 +340,7 @@ router.patch("/:id", async (req, res) => {
       where: { id },
       include: {
         user: {
-          select: {
-            name: true,
-            email: true,
-            businessName: true,
-            address: true,
-            phone: true,
-          },
+          select: userSelect,
         },
         customer: true,
         items: true,
@@ -444,13 +449,7 @@ router.post(
           customer: true,
           items: true,
           user: {
-            select: {
-              name: true,
-              email: true,
-              businessName: true,
-              address: true,
-              phone: true,
-            },
+            select: userSelect,
           },
         },
       });
@@ -470,22 +469,23 @@ router.post(
       await prisma.invoiceReminder.create({
         data: {
           invoiceId: id,
-          type: 'MANUAL',
-          channel: 'EMAIL',
-          status: 'SENT',
-          notes: 'Faktur dikirim via email'
-        }
+          type: "MANUAL",
+          channel: "EMAIL",
+          status: "SENT",
+          notes: "Faktur dikirim via email",
+        },
       });
 
-      res.json({ 
+      res.json({
         status: "success",
-        message: "Invoice sent successfully" 
+        message: "Invoice sent successfully",
       });
     } catch (error) {
       console.error("Error sending invoice:", error);
       res.status(500).json({
         status: "error",
-        message: error instanceof Error ? error.message : "Failed to send invoice",
+        message:
+          error instanceof Error ? error.message : "Failed to send invoice",
       });
     }
   }
@@ -698,13 +698,7 @@ router.post(
           customer: true,
           items: true,
           user: {
-            select: {
-              name: true,
-              email: true,
-              businessName: true,
-              address: true,
-              phone: true,
-            },
+            select: userSelect,
           },
         },
       });
@@ -719,7 +713,7 @@ router.post(
 
       // Generate PDF and get Cloudinary URL
       const pdfUrl = await generateInvoicePDF(invoice);
-      
+
       // Modify URL to force download
       const downloadUrl = pdfUrl.replace("/upload/", "/upload/");
 

@@ -16,7 +16,7 @@ const loginSchema = z.object({
 });
 
 const registerSchema = z.object({
-  name: z.string().min(2),
+  businessName: z.string().min(2),
   email: z.string().email(),
   password: z.string().min(6),
 });
@@ -55,7 +55,7 @@ export const login = async (req: Request, res: Response) => {
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const { name, email, password } = registerSchema.parse(req.body);
+    const { businessName, email, password } = registerSchema.parse(req.body);
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -65,7 +65,7 @@ export const register = async (req: Request, res: Response) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await prisma.user.create({
       data: {
-        name,
+        businessName,
         email,
         password: hashedPassword,
         role: Role.USER,

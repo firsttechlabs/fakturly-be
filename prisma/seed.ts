@@ -17,7 +17,7 @@ async function main() {
     const admin = await prisma.user.create({
       data: {
         email: 'admin@fakturly.com',
-        name: 'admin',
+        businessName: 'Fakturly Admin',
         password: hashedPassword,
         role: Role.ADMIN,
         isActive: true,

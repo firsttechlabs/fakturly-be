@@ -23,6 +23,18 @@ interface PricingInfo {
   promoDescription: string | null;
 }
 
+// Update user select in payment service
+const userSelect = {
+  id: true,
+  email: true,
+  businessName: true,
+  businessEmail: true,
+  businessPhone: true,
+  businessAddress: true,
+  businessLogo: true,
+  role: true,
+};
+
 export class PaymentService {
   private snap: midtransClient.Snap;
   private readonly LICENSE_PRICE: number;
@@ -106,7 +118,7 @@ export class PaymentService {
   async createMidtransPayment(params: MidtransPaymentParams) {
     const user = await prisma.user.findUnique({
       where: { id: params.userId },
-      select: { name: true, email: true },
+      select: userSelect,
     });
 
     if (!user) {
@@ -119,8 +131,8 @@ export class PaymentService {
         gross_amount: params.amount,
       },
       customer_details: {
-        first_name: user.name,
-        email: user.email,
+        first_name: user.businessName,
+        email: user.businessEmail || user.email,
       },
       callbacks: {
         finish: `${process.env.FRONTEND_URL}/dashboard`,
@@ -218,4 +230,27 @@ export class PaymentService {
       totalSlots: promo.maxUses
     };
   }
+}
+
+// Update payment processing function
+export async function processPayment(invoiceId: string, paymentData: any) {
+  const invoice = await prisma.invoice.findUnique({
+    where: { id: invoiceId },
+    include: {
+      user: {
+        select: userSelect,
+      },
+      customer: true,
+    },
+  });
+
+  if (!invoice) {
+    throw new Error('Invoice not found');
+  }
+
+  // Use businessName instead of name
+  const merchantName = invoice.user.businessName;
+  
+  // Rest of the payment processing logic...
+  // ... existing code ...
 }
