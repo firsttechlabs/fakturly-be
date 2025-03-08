@@ -1,8 +1,9 @@
-import { Payment, PaymentStatus } from '@prisma/client';
+import { Payment, PaymentStatus } from "@prisma/client";
 // @ts-ignore
 import midtransClient from "midtrans-client";
-import { BadRequestError } from '../utils/errors';
-import { prisma } from '../utils/prisma';
+import { BadRequestError } from "../utils/errors";
+import { prisma } from "../utils/prisma";
+import crypto from "crypto";
 
 interface MidtransPaymentParams {
   orderId: string;
@@ -14,6 +15,9 @@ interface MidtransNotification {
   transaction_status: string;
   order_id: string;
   fraud_status?: string;
+  status_code: string;
+  gross_amount: string;
+  signature_key: string;
 }
 
 interface PricingInfo {
@@ -37,17 +41,36 @@ const userSelect = {
 
 export class PaymentService {
   private snap: midtransClient.Snap;
+  private coreApi: midtransClient.CoreApi;
   private readonly LICENSE_PRICE: number;
+  private readonly serverKey: string;
 
   constructor() {
+    this.serverKey = process.env.MIDTRANS_SERVER_KEY!;
     this.snap = new midtransClient.Snap({
-      isProduction: process.env.NODE_ENV === 'production',
-      serverKey: process.env.MIDTRANS_SERVER_KEY!,
+      isProduction: process.env.NODE_ENV === "production",
+      serverKey: this.serverKey,
       clientKey: process.env.MIDTRANS_CLIENT_KEY!,
     });
-    
-    // Get license price from environment variable with fallback
+
+    this.coreApi = new midtransClient.CoreApi({
+      isProduction: process.env.NODE_ENV === "production",
+      serverKey: this.serverKey,
+      clientKey: process.env.MIDTRANS_CLIENT_KEY!,
+    });
+
     this.LICENSE_PRICE = Number(process.env.LICENSE_PRICE_IDR) || 500000;
+  }
+
+  private verifySignatureKey(notification: MidtransNotification): boolean {
+    const expectedSignature = crypto
+      .createHash("sha512")
+      .update(
+        `${notification.order_id}${notification.status_code}${notification.gross_amount}${this.serverKey}`
+      )
+      .digest("hex");
+
+    return notification.signature_key === expectedSignature;
   }
 
   async getPricingInfo(promoCode?: string): Promise<PricingInfo> {
@@ -68,7 +91,9 @@ export class PaymentService {
       });
 
       if (!promo) {
-        throw new BadRequestError("Kode promo tidak valid atau sudah kadaluarsa");
+        throw new BadRequestError(
+          "Kode promo tidak valid atau sudah kadaluarsa"
+        );
       }
 
       const promoUsage = await prisma.payment.count({
@@ -91,9 +116,10 @@ export class PaymentService {
       discountedPrice = Math.max(0, discountedPrice); // Ensure price doesn't go negative
 
       const remainingSlots = promo.maxUses - promoUsage;
-      promoDescription = promo.discountValue === 100
-        ? `Selamat! Anda mendapatkan akses GRATIS (tersisa ${remainingSlots} slot)`
-        : `${promo.description} (tersisa ${remainingSlots} slot)`;
+      promoDescription =
+        promo.discountValue === 100
+          ? `Selamat! Anda mendapatkan akses GRATIS (tersisa ${remainingSlots} slot)`
+          : `${promo.description} (tersisa ${remainingSlots} slot)`;
       validPromoCode = promo.code;
     }
 
@@ -122,7 +148,7 @@ export class PaymentService {
     });
 
     if (!user) {
-      throw new BadRequestError('User not found');
+      throw new BadRequestError("User not found");
     }
 
     const transaction = await this.snap.createTransaction({
@@ -138,57 +164,93 @@ export class PaymentService {
         finish: `${process.env.FRONTEND_URL}/dashboard`,
         error: `${process.env.FRONTEND_URL}/payment/${params.orderId}`,
         pending: `${process.env.FRONTEND_URL}/payment/${params.orderId}`,
-      }
+      },
     });
 
     return transaction;
   }
 
-  async handleNotification(notification: MidtransNotification): Promise<Payment> {
+  async handleNotification(
+    notification: MidtransNotification
+  ): Promise<Payment> {
+    // Verify signature key
+    if (!this.verifySignatureKey(notification)) {
+      throw new BadRequestError("Invalid signature key");
+    }
+
     const orderId = notification.order_id;
     const transactionStatus = notification.transaction_status;
     const fraudStatus = notification.fraud_status;
 
+    // Double check payment status via Midtrans API
+    try {
+      const transactionData = await this.coreApi.transaction.status(orderId);
+      // Verify transaction data matches notification
+      if (transactionData.transaction_status !== transactionStatus) {
+        throw new BadRequestError("Transaction status mismatch");
+      }
+    } catch (error) {
+      console.error("Error verifying transaction status:", error);
+      throw new BadRequestError("Failed to verify transaction status");
+    }
+
     const payment = await prisma.payment.findUnique({
-      where: { id: orderId },
+      where: { midtransId: orderId },
       include: { user: true },
     });
 
     if (!payment) {
-      throw new BadRequestError('Payment not found');
+      throw new BadRequestError("Payment not found");
     }
 
     let paymentStatus: PaymentStatus;
 
-    if (transactionStatus == 'capture') {
-      if (fraudStatus == 'challenge') {
-        paymentStatus = 'PENDING';
-      } else if (fraudStatus == 'accept') {
-        paymentStatus = 'SUCCESS';
-      } else {
-        paymentStatus = 'FAILED';
-      }
-    } else if (transactionStatus == 'settlement') {
-      paymentStatus = 'SUCCESS';
-    } else if (transactionStatus == 'cancel' || transactionStatus == 'deny' || transactionStatus == 'expire') {
-      paymentStatus = 'FAILED';
-    } else if (transactionStatus == 'pending') {
-      paymentStatus = 'PENDING';
-    } else {
-      paymentStatus = 'FAILED';
+    // Handle various transaction statuses
+    switch (transactionStatus) {
+      case "capture":
+        paymentStatus =
+          fraudStatus === "challenge"
+            ? "PENDING"
+            : fraudStatus === "accept"
+            ? "SUCCESS"
+            : "FAILED";
+        break;
+      case "settlement":
+        paymentStatus = "SUCCESS";
+        break;
+      case "pending":
+        paymentStatus = "PENDING";
+        break;
+      case "deny":
+      case "cancel":
+      case "expire":
+      case "failure":
+        paymentStatus = "FAILED";
+        break;
+      default:
+        paymentStatus = "FAILED";
     }
 
+    // Update payment status in database
     const updatedPayment = await prisma.payment.update({
-      where: { id: orderId },
+      where: { midtransId: orderId },
       data: { status: paymentStatus },
     });
 
-    // If payment is successful, activate the user
-    if (paymentStatus === 'SUCCESS') {
+    // If payment is successful, activate user's account
+    if (paymentStatus === "SUCCESS") {
       await prisma.user.update({
         where: { id: payment.userId },
         data: { isActive: true },
       });
+
+      // If payment used a promo code, increment the usage count
+      if (payment.promoCode) {
+        await prisma.promoCode.update({
+          where: { code: payment.promoCode },
+          data: { currentUses: { increment: 1 } },
+        });
+      }
     }
 
     return updatedPayment;
@@ -198,14 +260,16 @@ export class PaymentService {
     const payment = await prisma.payment.findFirst({
       where: {
         userId,
-        status: 'SUCCESS',
+        status: "SUCCESS",
       },
     });
 
     return !!payment;
   }
 
-  async getRemainingPromoSlots(code: string): Promise<{ remainingSlots: number; totalSlots: number }> {
+  async getRemainingPromoSlots(
+    code: string
+  ): Promise<{ remainingSlots: number; totalSlots: number }> {
     const promo = await prisma.promoCode.findUnique({
       where: {
         code,
@@ -227,7 +291,7 @@ export class PaymentService {
 
     return {
       remainingSlots: Math.max(0, promo.maxUses - usedSlots),
-      totalSlots: promo.maxUses
+      totalSlots: promo.maxUses,
     };
   }
 }
@@ -245,12 +309,12 @@ export async function processPayment(invoiceId: string, paymentData: any) {
   });
 
   if (!invoice) {
-    throw new Error('Invoice not found');
+    throw new Error("Invoice not found");
   }
 
   // Use businessName instead of name
   const merchantName = invoice.user.businessName;
-  
+
   // Rest of the payment processing logic...
   // ... existing code ...
 }

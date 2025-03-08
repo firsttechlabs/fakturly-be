@@ -239,7 +239,7 @@ router.post('/google', async (req, res, next) => {
           email: email,
           businessName: email.split('@')[0], // Use email prefix as business name
           password: '', // Empty password for Google users
-          isActive: true,
+          isActive: false,
           isGoogleUser: true,
           hasPassword: false,
           settings: {

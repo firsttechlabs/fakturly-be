@@ -206,4 +206,39 @@ router.post("/invoice/:id/reminders", authenticate, async (req: Request, res: Re
   }
 });
 
+// Get new payment token
+router.post("/:id/token", authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const paymentId = req.params.id;
+    const userId = (req as any).user.id;
+
+    // Find payment
+    const payment = await prisma.payment.findFirst({
+      where: {
+        id: paymentId,
+        userId,
+        status: "PENDING",
+      },
+    });
+
+    if (!payment) {
+      throw new AppError(404, "Payment not found or not in pending status");
+    }
+
+    // Create new Midtrans transaction
+    const midtransResponse = await paymentService.createMidtransPayment({
+      orderId: payment.id,
+      amount: payment.amount,
+      userId,
+    });
+
+    res.json({
+      status: "success",
+      token: midtransResponse.token,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export { router as paymentRouter };
