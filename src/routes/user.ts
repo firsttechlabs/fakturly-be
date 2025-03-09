@@ -47,11 +47,26 @@ const updatePasswordSchema = z.object({
 });
 
 const updateProfileSchema = z.object({
-  businessName: z.string().min(2).optional(),
+  businessName: z.string().min(2, "Nama usaha minimal 2 karakter").optional(),
   businessLogo: z.string().optional(),
-  businessAddress: z.string().optional(),
-  businessPhone: z.string().optional(),
-  businessEmail: z.string().email().optional(),
+  businessAddress: z.string()
+    .transform(val => val === "" ? null : val)
+    .nullable()
+    .optional(),
+  businessPhone: z.string()
+    .transform(val => val === "" ? null : val)
+    .refine(val => val === null || /^(\+62|62|0)8[1-9][0-9]{6,9}$/.test(val), {
+      message: "Format nomor telepon tidak valid (contoh: 081234567890)",
+    })
+    .nullable()
+    .optional(),
+  businessEmail: z.string()
+    .transform(val => val === "" ? null : val)
+    .refine(val => val === null || /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(val), {
+      message: "Format email tidak valid",
+    })
+    .nullable()
+    .optional(),
   currentPassword: z.string().optional(),
   newPassword: z.string().min(8, "Kata sandi minimal 8 karakter").optional(),
 });

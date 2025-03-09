@@ -36,14 +36,14 @@ async function main() {
 
   // Check if promo code exists
   const existingPromo = await prisma.promoCode.findUnique({
-    where: { code: 'BERKAHBOSQUE' }
+    where: { code: 'BERKAHRAMADAN' }
   });
 
   if (!existingPromo) {
     // Create promo code for first 50 users
     const promoCode = await prisma.promoCode.create({
       data: {
-        code: 'BERKAHBOSQUE',
+        code: 'BERKAHRAMADAN',
         description: 'Promo khusus 50 pengguna pertama',
         discountType: 'PERCENTAGE',
         discountValue: 100, // 100% discount

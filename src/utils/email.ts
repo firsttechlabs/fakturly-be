@@ -85,266 +85,329 @@ export async function sendInvoiceEmail(
   const statusText = getStatusText(status);
   const statusColor = getStatusColor(status);
 
-  // Prepare business info section
-  const businessInfoSection = `
-    <div class="section-title">Informasi Bisnis</div>
-    <div class="detail-label">Nama Usaha</div>
-    <div class="detail-value">${user.businessName}</div>
-    ${user.businessEmail ? `
-    <div class="detail-label">Email Bisnis</div>
-    <div class="detail-value">${user.businessEmail}</div>
-    ` : ''}
-    ${user.businessPhone ? `
-    <div class="detail-label">Telepon Bisnis</div>
-    <div class="detail-value">${user.businessPhone}</div>
-    ` : ''}
-    ${user.businessAddress ? `
-    <div class="detail-label">Alamat Bisnis</div>
-    <div class="detail-value">${user.businessAddress}</div>
-    ` : ''}
-  `;
-
   const html = `
     <!DOCTYPE html>
     <html>
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Faktur #${number}</title>
+      <title>${status === "PAID" ? "Kwitansi" : "Faktur"} #${number}</title>
       <style>
         body { 
           margin: 0; 
           padding: 0; 
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
           line-height: 1.4;
-          color: #2D3748;
-          background-color: #F7FAFC;
-        }
-        table {
-          border-collapse: collapse;
-          width: 100%;
-        }
-        td {
-          padding: 0;
+          color: #0A2540;
+          background-color: #F6F9FC;
         }
         .main-table {
           width: 100%;
-          max-width: 600px;
+          max-width: 800px;
           margin: 0 auto;
           background: white;
+          border-radius: 16px;
+          overflow: hidden;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .header {
+          background: linear-gradient(45deg, #635BFF 30%, #7B75FF 90%);
+          color: white;
+          padding: 32px;
+          text-align: center;
+        }
+        .header-logo {
+          max-width: 200px;
+          max-height: 80px;
+          margin-bottom: 16px;
+        }
+        .header-title {
+          font-size: 28px;
+          font-weight: 600;
+          margin: 0;
+          letter-spacing: -0.02em;
+        }
+        .content {
+          padding: 32px;
+        }
+        .section {
+          margin-bottom: 32px;
         }
         .section-title {
-          font-size: 14px;
+          font-size: 16px;
           font-weight: 600;
-          color: #4A5568;
+          color: #635BFF;
           text-transform: uppercase;
           letter-spacing: 0.5px;
-          margin: 0;
+          margin: 0 0 16px 0;
           padding-bottom: 8px;
+          border-bottom: 2px solid #F6F9FC;
+        }
+        .info-grid {
+          width: 100%;
+          border-collapse: separate;
+          border-spacing: 16px;
+        }
+        .info-cell {
+          background: #F8FAFC;
+          padding: 16px;
+          border-radius: 12px;
+          vertical-align: top;
         }
         .status-badge {
           display: inline-block;
-          padding: 4px 12px;
+          padding: 8px 16px;
           border-radius: 12px;
-          font-size: 13px;
+          font-size: 14px;
           font-weight: 500;
           color: white;
           background-color: ${statusColor};
         }
         .detail-label {
           font-size: 13px;
-          color: #718096;
-          padding-bottom: 2px;
+          color: #425466;
+          margin-bottom: 4px;
         }
         .detail-value {
           font-size: 14px;
-          color: #2D3748;
-          padding-bottom: 8px;
+          color: #0A2540;
+          margin-bottom: 12px;
+          font-weight: 500;
+        }
+        .items-table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-top: 8px;
         }
         .items-table th {
           background: #F8FAFC;
-          padding: 8px;
+          padding: 12px;
           text-align: left;
           font-size: 13px;
           font-weight: 600;
-          color: #4A5568;
+          color: #425466;
           border-bottom: 1px solid #E2E8F0;
           border-top: 1px solid #E2E8F0;
         }
         .items-table td {
-          padding: 8px;
-          font-size: 13px;
-          color: #4A5568;
+          padding: 12px;
+          font-size: 14px;
+          color: #0A2540;
           border-bottom: 1px solid #E2E8F0;
         }
-        .amount-right {
+        .amount-table {
+          width: 100%;
+          border-collapse: separate;
+          border-spacing: 8px;
+          margin-top: 24px;
+        }
+        .amount-row td {
+          padding: 8px 0;
+          font-size: 14px;
+        }
+        .amount-label {
+          color: #425466;
           text-align: right;
         }
+        .amount-value {
+          color: #0A2540;
+          text-align: right;
+          font-weight: 500;
+          width: 35%;
+        }
+        .total-row td {
+          padding-top: 16px;
+          font-size: 16px;
+          font-weight: 600;
+          color: #635BFF;
+        }
         .notes {
-          background: #FFFAF0;
-          padding: 12px;
-          font-size: 13px;
+          background: #FFF8E7;
+          padding: 16px;
+          border-radius: 12px;
+          margin-top: 32px;
+        }
+        .notes-title {
+          font-size: 14px;
+          font-weight: 600;
+          color: #B7791F;
+          margin: 0 0 8px 0;
+        }
+        .notes-content {
+          font-size: 14px;
           color: #744210;
-          border-radius: 4px;
+          margin: 0;
+        }
+        .footer {
+          text-align: center;
+          padding: 32px;
+          background: #F8FAFC;
+          color: #425466;
+          font-size: 13px;
         }
       </style>
     </head>
     <body>
       <table class="main-table" cellpadding="0" cellspacing="0" border="0" align="center">
         <tr>
-          <td style="padding: 24px;">
-            <!-- Header with Logo -->
+          <td>
+            <!-- Header -->
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td align="center" style="padding-bottom: 20px; border-bottom: 1px solid #E2E8F0;">
+                <td class="header">
                   ${user.businessLogo ? `
-                    <img src="${user.businessLogo}" alt="${user.businessName}" style="max-width: 200px; max-height: 80px; margin-bottom: 12px;">
-                  ` : `
-                    <div style="font-size: 22px; font-weight: bold; color: #1976D2;">${user.businessName}</div>
-                  `}
+                    <img src="${user.businessLogo}" alt="${user.businessName}" class="header-logo">
+                  ` : ''}
+                  <h1 class="header-title">${status === "PAID" ? "Kwitansi" : "Faktur"} #${number}</h1>
                 </td>
               </tr>
             </table>
 
-            <!-- Invoice Info -->
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 20px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td style="background: #F8FAFC; padding: 16px; border-radius: 4px;">
-                  <div style="font-size: 16px; font-weight: 600; color: #2D3748; margin-bottom: 8px;">
-                    Faktur #${number}
+                <td class="content">
+                  <!-- Status -->
+                  <div class="section">
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td align="center">
+                          <div class="status-badge">${statusText}</div>
+                        </td>
+                      </tr>
+                    </table>
                   </div>
-                  <div class="status-badge">${statusText}</div>
-                </td>
-              </tr>
-            </table>
 
-            <!-- Business & Customer Info -->
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 20px;">
-              <tr>
-                <td width="48%" valign="top">
-                  ${businessInfoSection}
-                </td>
-                <td width="4%"></td>
-                <td width="48%" valign="top">
-                  <div class="section-title">Informasi Pelanggan</div>
-                  <div class="detail-label">Nama</div>
-                  <div class="detail-value">${customer.name}</div>
-                  ${customer.email ? `
-                  <div class="detail-label">Email</div>
-                  <div class="detail-value">${customer.email}</div>
-                  ` : ''}
-                  ${customer.address ? `
-                  <div class="detail-label">Alamat</div>
-                  <div class="detail-value">${customer.address}</div>
-                  ` : ''}
-                  ${customer.phone ? `
-                  <div class="detail-label">Telepon</div>
-                  <div class="detail-value">${customer.phone}</div>
-                  ` : ''}
-                </td>
-              </tr>
-            </table>
+                  <!-- Business & Customer Info -->
+                  <div class="section">
+                    <table class="info-grid">
+                      <tr>
+                        <td class="info-cell" width="50%">
+                          <div class="section-title">Informasi Bisnis</div>
+                          <div class="detail-label">Nama Usaha</div>
+                          <div class="detail-value">${user.businessName}</div>
+                          ${user.businessEmail ? `
+                            <div class="detail-label">Email</div>
+                            <div class="detail-value">${user.businessEmail}</div>
+                          ` : ''}
+                          ${user.businessPhone ? `
+                            <div class="detail-label">Telepon</div>
+                            <div class="detail-value">${user.businessPhone}</div>
+                          ` : ''}
+                          ${user.businessAddress ? `
+                            <div class="detail-label">Alamat</div>
+                            <div class="detail-value">${user.businessAddress}</div>
+                          ` : ''}
+                        </td>
+                        <td class="info-cell" width="50%">
+                          <div class="section-title">Informasi Pelanggan</div>
+                          <div class="detail-label">Nama</div>
+                          <div class="detail-value">${customer.name}</div>
+                          ${customer.email ? `
+                            <div class="detail-label">Email</div>
+                            <div class="detail-value">${customer.email}</div>
+                          ` : ''}
+                          ${customer.phone ? `
+                            <div class="detail-label">Telepon</div>
+                            <div class="detail-value">${customer.phone}</div>
+                          ` : ''}
+                          ${customer.address ? `
+                            <div class="detail-label">Alamat</div>
+                            <div class="detail-value">${customer.address}</div>
+                          ` : ''}
+                        </td>
+                      </tr>
+                    </table>
+                  </div>
 
-            <!-- Invoice Details -->
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 20px;">
-              <tr>
-                <td>
-                  <div class="section-title">Detail Faktur</div>
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 8px;">
-                    <tr>
-                      <td width="48%">
-                        <div class="detail-label">Tanggal Faktur</div>
-                        <div class="detail-value">${formatDate(date)}</div>
-                      </td>
-                      <td width="4%"></td>
-                      <td width="48%">
-                        <div class="detail-label">Jatuh Tempo</div>
-                        <div class="detail-value">${formatDate(dueDate)}</div>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-            </table>
+                  <!-- Invoice Details -->
+                  <div class="section">
+                    <div class="section-title">Detail ${status === "PAID" ? "Kwitansi" : "Faktur"}</div>
+                    <table class="info-grid">
+                      <tr>
+                        <td class="info-cell" width="50%">
+                          <div class="detail-label">Tanggal</div>
+                          <div class="detail-value">${formatDate(date)}</div>
+                        </td>
+                        <td class="info-cell" width="50%">
+                          <div class="detail-label">Jatuh Tempo</div>
+                          <div class="detail-value">${formatDate(dueDate)}</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </div>
 
-            <!-- Items -->
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 20px;">
-              <tr>
-                <td>
-                  <div class="section-title" style="margin-bottom: 8px;">Rincian Item</div>
-                  <table width="100%" cellpadding="0" cellspacing="0" class="items-table">
-                    <tr>
-                      <th width="40%">Deskripsi</th>
-                      <th width="20%">Jumlah</th>
-                      <th width="20%">Harga</th>
-                      <th width="20%" style="text-align: right;">Total</th>
-                    </tr>
-                    ${items.map(item => `
-                    <tr>
-                      <td>${item.description}</td>
-                      <td>${item.quantity}</td>
-                      <td>${formatRupiah(item.price)}</td>
-                      <td style="text-align: right;">${formatRupiah(item.amount)}</td>
-                    </tr>
-                    `).join('')}
-                  </table>
-
-                  <!-- Totals -->
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 12px;">
-                    <tr>
-                      <td width="60%"></td>
-                      <td width="40%">
-                        <table width="100%" cellpadding="4" cellspacing="0" border="0">
+                  <!-- Items -->
+                  <div class="section">
+                    <div class="section-title">Rincian Item</div>
+                    <table class="items-table">
+                      <thead>
+                        <tr>
+                          <th width="45%">Deskripsi</th>
+                          <th width="15%">Jumlah</th>
+                          <th width="20%">Harga</th>
+                          <th width="20%" style="text-align: right;">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${items.map(item => `
                           <tr>
-                            <td style="font-size: 13px;">Subtotal</td>
-                            <td style="text-align: right; font-size: 13px;">${formatRupiah(subtotal)}</td>
+                            <td>${item.description}</td>
+                            <td>${item.quantity}</td>
+                            <td>${formatRupiah(item.price)}</td>
+                            <td style="text-align: right;">${formatRupiah(item.amount)}</td>
                           </tr>
-                          <tr>
-                            <td style="font-size: 13px;">Pajak</td>
-                            <td style="text-align: right; font-size: 13px;">${formatRupiah(tax)}</td>
-                          </tr>
-                          <tr>
-                            <td style="font-size: 14px; font-weight: 600; padding-top: 8px; border-top: 1px solid #E2E8F0;">Total</td>
-                            <td style="text-align: right; font-size: 14px; font-weight: 600; padding-top: 8px; border-top: 1px solid #E2E8F0;">${formatRupiah(total)}</td>
-                          </tr>
-                        </table>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-            </table>
+                        `).join('')}
+                      </tbody>
+                    </table>
 
-            ${notes ? `
-            <!-- Notes -->
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 20px;">
-              <tr>
-                <td class="notes">
-                  <div class="section-title">Catatan</div>
-                  ${notes}
-                </td>
-              </tr>
-            </table>
-            ` : ''}
+                    <!-- Totals -->
+                    <table class="amount-table">
+                      <tr class="amount-row">
+                        <td class="amount-label">Subtotal</td>
+                        <td class="amount-value">${formatRupiah(subtotal)}</td>
+                      </tr>
+                      <tr class="amount-row">
+                        <td class="amount-label">Pajak</td>
+                        <td class="amount-value">${formatRupiah(tax)}</td>
+                      </tr>
+                      <tr class="amount-row total-row">
+                        <td class="amount-label">Total</td>
+                        <td class="amount-value">${formatRupiah(total)}</td>
+                      </tr>
+                    </table>
+                  </div>
 
-            ${status === "PAID" && paymentProof ? `
-            <!-- Payment Proof -->
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 20px;">
-              <tr>
-                <td>
-                  <div class="section-title">Bukti Pembayaran</div>
-                  <img src="${paymentProof}" alt="Bukti Pembayaran" style="max-width: 100%; border-radius: 4px; margin-top: 8px;">
+                  ${notes ? `
+                    <!-- Notes -->
+                    <div class="notes">
+                      <div class="notes-title">Catatan</div>
+                      <p class="notes-content">${notes}</p>
+                    </div>
+                  ` : ''}
+
+                  ${status === "PAID" && paymentProof ? `
+                    <!-- Payment Proof -->
+                    <div class="section">
+                      <div class="section-title">Bukti Pembayaran</div>
+                      <img src="${paymentProof}" alt="Bukti Pembayaran" style="max-width: 100%; border-radius: 12px; margin-top: 8px;">
+                    </div>
+                  ` : ''}
                 </td>
               </tr>
             </table>
-            ` : ''}
 
             <!-- Footer -->
-            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #E2E8F0;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td align="center" style="font-size: 13px; color: #718096;">
-                  Email ini dibuat otomatis oleh sistem Fakturly.
-                  ${status !== "PAID" ? `<br>Harap melakukan pembayaran sebelum ${formatDate(dueDate)}.` : ''}
+                <td class="footer">
+                  <p style="margin: 0;">
+                    ${status === "PAID" 
+                      ? "Terima kasih atas pembayaran Anda. Ini adalah bukti pembayaran resmi dari transaksi yang telah dilakukan." 
+                      : `Harap melakukan pembayaran sebelum ${formatDate(dueDate)}.`}
+                  </p>
+                  <p style="margin: 8px 0 0 0;">
+                    Dokumen ini dibuat secara otomatis oleh sistem Fakturly
+                  </p>
                 </td>
               </tr>
             </table>
@@ -358,7 +421,7 @@ export async function sendInvoiceEmail(
   const mailOptions = {
     from: `"${user.businessName}" <${process.env.SMTP_USER}>`,
     to: customer.email,
-    subject: `Faktur #${number} ${status === 'PAID' ? '(LUNAS)' : ''}`,
+    subject: `${status === 'PAID' ? '(LUNAS)' : ''} Faktur #${number}`,
     html,
   };
 
